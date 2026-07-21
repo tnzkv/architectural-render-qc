@@ -1,0 +1,907 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Render QC — Architectural Compliance Check</title>
+<style>
+  :root {
+    --brand-50:#eef4ff; --brand-100:#dbe6fe; --brand-500:#3b6fed; --brand-600:#2f57c9; --brand-700:#2646a3;
+    --amber:#f59e0b; --green:#16a34a; --red:#dc2626; --purple:#7c3aed;
+    --bg:#f8fafc; --card:#ffffff; --border:#e2e8f0; --text:#0f172a; --muted:#64748b; --faint:#94a3b8;
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background:var(--bg); color:var(--text); }
+  a { color: inherit; text-decoration:none; }
+  button, select, input, textarea { font-family: inherit; font-size: 13px; }
+  header.topbar { position:sticky; top:0; z-index:10; background:var(--card); border-bottom:1px solid var(--border); }
+  .topbar-inner { max-width:1180px; margin:0 auto; padding:10px 16px; display:flex; align-items:center; gap:20px; }
+  .brand { font-weight:700; font-size:16px; color:var(--brand-700); }
+  .navlink { padding:7px 12px; border-radius:8px; font-size:13px; font-weight:500; color:var(--muted); }
+  .navlink.active, .navlink:hover { background:var(--brand-50); color:var(--brand-700); }
+  main { max-width:1180px; margin:0 auto; padding:20px 16px 60px; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  .muted { color:var(--muted); font-size:13px; }
+  .faint { color:var(--faint); }
+  .btn { border:1px solid var(--border); background:var(--card); border-radius:8px; padding:8px 14px; font-weight:500; cursor:pointer; }
+  .btn:hover { background:#f1f5f9; }
+  .btn-primary { background:var(--brand-600); border-color:var(--brand-600); color:#fff; }
+  .btn-primary:hover { background:var(--brand-700); }
+  .btn:disabled { opacity:.4; cursor:not-allowed; }
+  .btn-sm { padding:6px 10px; font-size:12px; }
+  .card { background:var(--card); border:1px solid var(--border); border-radius:12px; }
+  .row { display:flex; gap:8px; align-items:center; }
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  input[type=text], select, textarea { border:1px solid var(--border); border-radius:8px; padding:8px 10px; background:#fff; }
+  .list { list-style:none; margin:0; padding:0; }
+  .list li { border-bottom:1px solid var(--border); }
+  .list li:last-child { border-bottom:none; }
+  .list-item { display:flex; align-items:center; justify-content:space-between; padding:12px 16px; cursor:pointer; }
+  .list-item:hover { background:#f8fafc; }
+  .badge { font-size:10px; font-weight:600; padding:2px 8px; border-radius:999px; white-space:nowrap; }
+  .thumbgrid { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
+  .thumb { border:1px solid var(--border); border-radius:8px; overflow:hidden; text-align:left; cursor:pointer; background:#fff; padding:0; }
+  .thumb.selected { outline:2px solid var(--brand-600); outline-offset:-1px; }
+  .thumb img { width:100%; height:80px; object-fit:cover; display:block; }
+  .thumb .ph { width:100%; height:80px; background:#f1f5f9; display:flex; align-items:center; justify-content:center; font-size:11px; color:var(--faint); }
+  .thumb .cap { font-size:11px; padding:4px 6px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .metrics { display:grid; grid-template-columns:repeat(6,1fr); gap:8px; padding:14px 8px; }
+  .metrics .stat { text-align:center; }
+  .metrics .stat .v { font-size:20px; font-weight:700; }
+  .metrics .stat .l { font-size:11px; color:var(--faint); }
+  .imgpanel-head { font-size:11px; font-weight:600; color:var(--muted); padding:8px 12px; border-bottom:1px solid var(--border); background:#f8fafc; }
+  .imgwrap { position:relative; background:#f1f5f9; min-height:160px; }
+  .imgwrap img { width:100%; display:block; }
+  .imgwrap svg.overlay { position:absolute; inset:0; width:100%; height:100%; }
+  .disc-card { border:1px solid var(--border); border-radius:10px; padding:10px 12px; cursor:pointer; background:#fff; }
+  .disc-card.active { border-color: var(--brand-500); background: var(--brand-50); }
+  .disc-card + .disc-card { margin-top:8px; }
+  .disc-top { display:flex; justify-content:space-between; align-items:flex-start; gap:8px; }
+  .disc-name { font-weight:600; font-size:13px; }
+  .disc-type { font-size:11px; color:var(--muted); }
+  .disc-desc { font-size:12px; color:#475569; margin:6px 0 0; }
+  .disc-bottom { display:flex; justify-content:space-between; align-items:center; margin-top:8px; }
+  .iconbtn { width:28px; height:28px; border-radius:6px; border:1px solid var(--border); background:#fff; cursor:pointer; font-size:14px; line-height:1; }
+  .iconbtn.on-tp { background:var(--green); color:#fff; border-color:var(--green); }
+  .iconbtn.on-fp { background:var(--red); color:#fff; border-color:var(--red); }
+  .modal-backdrop { position:fixed; inset:0; background:rgba(15,23,42,.45); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px; }
+  .modal { background:#fff; border-radius:12px; padding:20px; max-width:420px; width:100%; box-shadow:0 20px 40px rgba(0,0,0,.15); }
+  .field { margin-bottom:12px; }
+  .field label { display:block; font-size:12px; color:var(--muted); margin-bottom:4px; }
+  .field input, .field select, .field textarea { width:100%; }
+  .empty { color:var(--faint); font-size:13px; padding:24px 0; text-align:center; }
+  .table { width:100%; border-collapse:collapse; }
+  .table th { text-align:left; font-size:11px; text-transform:uppercase; color:var(--faint); font-weight:600; padding:8px 16px; border-bottom:1px solid var(--border); }
+  .table td { padding:10px 16px; font-size:13px; border-bottom:1px solid var(--border); }
+  .table tr:hover td { background:#f8fafc; cursor:pointer; }
+  .toast { position:fixed; bottom:20px; right:20px; background:var(--text); color:#fff; padding:10px 16px; border-radius:8px; font-size:13px; z-index:200; }
+  .filters { display:flex; gap:8px; margin-bottom:10px; flex-wrap:wrap; }
+  .reviewgrid { display:grid; grid-template-columns:1fr 1fr 340px; gap:14px; align-items:start; }
+  @media (max-width: 960px) { .reviewgrid { grid-template-columns:1fr; } }
+</style>
+</head>
+<body>
+<header class="topbar">
+  <div class="topbar-inner">
+    <span class="brand">Render QC</span>
+    <a href="#/" class="navlink" data-nav="/">Проєкти</a>
+    <button id="settings-btn" class="btn btn-sm" style="margin-left:auto;">⚙ AI-налаштування</button>
+    <span class="faint" id="ai-mode-badge" style="font-size:11px;"></span>
+  </div>
+</header>
+<main id="app"></main>
+<div id="global-modal-root"></div>
+
+<script>
+(function () {
+  "use strict";
+
+  var ELEMENT_TYPES = ["window","door","garage_door","roof","roof_section","dormer_window","balcony","column","railing","stairs","canopy","terrace","facade_decor","exterior_light","gutter","downspout","chimney","other"];
+  var ERROR_TYPE_LABEL = {
+    missing: "Відсутній елемент", extra: "Зайвий елемент", wrong_type: "Невірний тип",
+    orientation_mismatch: "Невірна орієнтація/напрямок", count_mismatch: "Невірна кількість секцій",
+    design_mismatch: "Невідповідність дизайну"
+  };
+  var ERROR_TYPES = Object.keys(ERROR_TYPE_LABEL);
+  var STATUS_COLOR = { unreviewed:"#f59e0b", tp:"#16a34a", fp:"#dc2626", fn:"#7c3aed" };
+  var STATUS_LABEL = { unreviewed:"Не перевірено", tp:"TP · підтверджено", fp:"FP · хибне спрацювання", fn:"FN · пропущено AI" };
+  var STATUS_BG = { unreviewed:"#fef3c7", tp:"#dcfce7", fp:"#fee2e2", fn:"#ede9fe" };
+
+  var TEMPLATES = [
+    { element_type:"window", error_type:"missing", nameFmt:"Window {tag}", desc:"Присутнє на фасадному кресленні, але відсутнє на рендері.", needsDrawing:true, needsRender:false },
+    { element_type:"window", error_type:"extra", nameFmt:"Window {tag}", desc:"На рендері з'явилося вікно, якого немає на кресленні.", needsDrawing:false, needsRender:true },
+    { element_type:"window", error_type:"wrong_type", nameFmt:"Window {tag}", desc:"На кресленні одностулкове вікно, на рендері — двостулкове.", needsDrawing:true, needsRender:true },
+    { element_type:"window", error_type:"orientation_mismatch", nameFmt:"Window {tag}", desc:"На кресленні стулка відкривається вправо, на рендері — вліво.", needsDrawing:true, needsRender:true },
+    { element_type:"window", error_type:"count_mismatch", nameFmt:"Window {tag}", desc:"На кресленні три секції скла, на рендері — дві.", needsDrawing:true, needsRender:true },
+    { element_type:"dormer_window", error_type:"missing", nameFmt:"Dormer {tag}", desc:"Мансардне вікно є на кресленні даху, але відсутнє на рендері.", needsDrawing:true, needsRender:false },
+    { element_type:"door", error_type:"wrong_type", nameFmt:"Entry Door {tag}", desc:"Тип вхідних дверей на рендері не відповідає кресленню.", needsDrawing:true, needsRender:true },
+    { element_type:"garage_door", error_type:"design_mismatch", nameFmt:"Garage Door {tag}", desc:"Конфігурація панелей гаражних воріт не відповідає кресленню.", needsDrawing:true, needsRender:true },
+    { element_type:"roof_section", error_type:"missing", nameFmt:"Roof Section {tag}", desc:"На кресленні є дах над цією частиною будинку, на рендері він відсутній.", needsDrawing:true, needsRender:false },
+    { element_type:"chimney", error_type:"missing", nameFmt:"Chimney {tag}", desc:"Димохід присутній на кресленні, але відсутній на рендері.", needsDrawing:true, needsRender:false },
+    { element_type:"balcony", error_type:"wrong_type", nameFmt:"Balcony {tag}", desc:"Форма балкона на рендері відрізняється від креслення.", needsDrawing:true, needsRender:true },
+    { element_type:"railing", error_type:"wrong_type", nameFmt:"Railing {tag}", desc:"Інший тип огорожі — суцільна панель замість балясин.", needsDrawing:true, needsRender:true },
+    { element_type:"canopy", error_type:"missing", nameFmt:"Canopy {tag}", desc:"Навіс над входом присутній на кресленні, але відсутній на рендері.", needsDrawing:true, needsRender:false },
+    { element_type:"column", error_type:"extra", nameFmt:"Column {tag}", desc:"На рендері зайва колона, якої немає на кресленні.", needsDrawing:false, needsRender:true },
+    { element_type:"facade_decor", error_type:"missing", nameFmt:"Decorative Beam {tag}", desc:"Декоративні балки з креслення відсутні на рендері.", needsDrawing:true, needsRender:false },
+    { element_type:"facade_decor", error_type:"wrong_type", nameFmt:"Facade Cladding {tag}", desc:"Тип фасадного оздоблення на рендері не відповідає кресленню.", needsDrawing:true, needsRender:true },
+    { element_type:"exterior_light", error_type:"missing", nameFmt:"Exterior Light {tag}", desc:"Зовнішній світильник вказаний на кресленні, але відсутній на рендері.", needsDrawing:true, needsRender:false },
+    { element_type:"gutter", error_type:"missing", nameFmt:"Gutter Run {tag}", desc:"Ринва вздовж карниза присутня на кресленні, але не відображена на рендері.", needsDrawing:true, needsRender:false },
+    { element_type:"downspout", error_type:"extra", nameFmt:"Downspout {tag}", desc:"На рендері зайвий водостік, якого немає на кресленні.", needsDrawing:false, needsRender:true },
+    { element_type:"stairs", error_type:"wrong_type", nameFmt:"Stairs {tag}", desc:"Кількість маршів сходів на рендері відрізняється від креслення.", needsDrawing:true, needsRender:true },
+    { element_type:"terrace", error_type:"wrong_type", nameFmt:"Terrace {tag}", desc:"Форма/огородження тераси на рендері відрізняється від креслення.", needsDrawing:true, needsRender:true }
+  ];
+  var TAGS = ["A-1","A-2","B-1","B-2","C-1","N-01","S-02","E-03","W-04","12","07","R-1"];
+
+  function mulberry32(seed) {
+    return function () {
+      seed |= 0; seed = (seed + 0x6D2B79F5) | 0;
+      var t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  function pick(rng, arr) { return arr[Math.floor(rng() * arr.length)]; }
+  function shuffleSample(rng, arr, n) {
+    var copy = arr.slice();
+    for (var i = copy.length - 1; i > 0; i--) {
+      var j = Math.floor(rng() * (i + 1));
+      var tmp = copy[i]; copy[i] = copy[j]; copy[j] = tmp;
+    }
+    return copy.slice(0, n);
+  }
+  function randBBox(rng) {
+    var w = 0.05 + rng() * 0.13, h = 0.06 + rng() * 0.14;
+    var x = 0.02 + rng() * Math.max(0.02, 1 - w - 0.04);
+    var y = 0.05 + rng() * Math.max(0.05, 1 - h - 0.15);
+    return { x: round4(x), y: round4(y), w: round4(w), h: round4(h) };
+  }
+  function round4(n) { return Math.round(n * 10000) / 10000; }
+
+  function runComparison(runId) {
+    var rng = mulberry32(1000 + runId * 31);
+    var n = 5 + Math.floor(rng() * 6);
+    var chosen = shuffleSample(rng, TEMPLATES, Math.min(n, TEMPLATES.length));
+    return chosen.map(function (tpl) {
+      var tag = pick(rng, TAGS);
+      return {
+        element_name: tpl.nameFmt.replace("{tag}", tag),
+        element_type: tpl.element_type,
+        error_type: tpl.error_type,
+        description: tpl.desc,
+        confidence: Math.round((0.62 + rng() * 0.36) * 100) / 100,
+        drawing_bbox: tpl.needsDrawing ? randBBox(rng) : null,
+        render_bbox: tpl.needsRender ? randBBox(rng) : null
+      };
+    });
+  }
+
+  // ---------- AI settings & real Claude Vision analysis ----------
+  var SETTINGS_KEY = "renderqc_settings_v1";
+  var DEFAULT_MODEL = "claude-opus-4-8";
+
+  function loadSettings() {
+    try {
+      var raw = localStorage.getItem(SETTINGS_KEY);
+      if (!raw) return { anthropicApiKey: "", model: DEFAULT_MODEL };
+      var parsed = JSON.parse(raw);
+      return { anthropicApiKey: parsed.anthropicApiKey || "", model: parsed.model || DEFAULT_MODEL };
+    } catch (e) { return { anthropicApiKey: "", model: DEFAULT_MODEL }; }
+  }
+  function saveSettings(s) {
+    try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); return true; }
+    catch (e) { return false; }
+  }
+
+  function updateAiBadge() {
+    var badge = document.getElementById("ai-mode-badge");
+    if (!badge) return;
+    var s = loadSettings();
+    if (s.anthropicApiKey) {
+      badge.textContent = "🤖 Реальний AI · " + s.model;
+      badge.style.color = "var(--green)";
+    } else {
+      badge.textContent = "🎲 Мок-режим · ключ не додано";
+      badge.style.color = "var(--faint)";
+    }
+  }
+
+  function parseDataUrl(dataUrl) {
+    var m = /^data:([^;]+);base64,(.*)$/s.exec(dataUrl || "");
+    if (!m) return null;
+    return { mediaType: m[1], base64: m[2] };
+  }
+
+  var SYSTEM_PROMPT =
+    "Ти - експерт з архітектурного QA. Твоя задача - порівняти архітектурний рендер із кресленням фасаду " +
+    "і знайти СЕМАНТИЧНІ невідповідності в архітектурних елементах (вікна, двері, гаражні ворота, дах, " +
+    "секції даху, мансардні вікна, балкони, колони, перила, сходи, навіси, тераси, декоративні елементи " +
+    "фасаду, зовнішні світильники, ринви, водостоки, димоходи тощо).\n\n" +
+    "ДУЖЕ ВАЖЛИВО: НЕ перевіряй розміри, масштаб, пропорції чи точні координати об'єктів. Не звертай увагу " +
+    "на те, що вікно ширше на кілька міліметрів або зміщене на кілька сантиметрів. Перевіряй ЛИШЕ те, чи " +
+    "правильні елементи присутні і чи відповідають вони кресленню за типом/конфігурацією/орієнтацією.\n\n" +
+    "Для кожної знайденої невідповідності визнач: назву елемента, тип елемента (з фіксованого списку), " +
+    "тип помилки (missing - є на кресленні, немає на рендері; extra - зайвий на рендері; wrong_type - " +
+    "невірний тип/дизайн; orientation_mismatch - невірний напрямок відкривання/орієнтація; count_mismatch - " +
+    "невірна кількість секцій/панелей; design_mismatch - загальна невідповідність дизайну), опис українською, " +
+    "рівень впевненості (0-1), та нормалізовані (0-1 відносно ширини/висоти зображення) bounding box " +
+    "координати на кресленні і/або на рендері (null, якщо елемента немає на відповідному зображенні). " +
+    "Якщо явних невідповідностей немає, поверни порожній список.";
+
+  function buildDiscrepancySchema() {
+    var bboxSchema = {
+      type: "object",
+      properties: { x: { type: "number" }, y: { type: "number" }, w: { type: "number" }, h: { type: "number" } },
+      required: ["x", "y", "w", "h"],
+      additionalProperties: false
+    };
+    return {
+      type: "object",
+      properties: {
+        discrepancies: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              element_name: { type: "string" },
+              element_type: { type: "string", enum: ELEMENT_TYPES },
+              error_type: { type: "string", enum: ERROR_TYPES },
+              description: { type: "string" },
+              confidence: { type: "number" },
+              drawing_bbox: { anyOf: [bboxSchema, { type: "null" }] },
+              render_bbox: { anyOf: [bboxSchema, { type: "null" }] }
+            },
+            required: ["element_name", "element_type", "error_type", "description", "confidence", "drawing_bbox", "render_bbox"],
+            additionalProperties: false
+          }
+        }
+      },
+      required: ["discrepancies"],
+      additionalProperties: false
+    };
+  }
+
+  async function callClaudeVision(drawingAsset, renderAsset, settings) {
+    var drawing = parseDataUrl(drawingAsset && drawingAsset.dataUrl);
+    var render = parseDataUrl(renderAsset && renderAsset.dataUrl);
+    if (!drawing || !render) {
+      throw new Error("Реальний AI підтримує лише завантажені JPG/PNG зображення (не демо-SVG).");
+    }
+    var body = {
+      model: settings.model || DEFAULT_MODEL,
+      max_tokens: 4096,
+      output_config: { effort: "high", format: { type: "json_schema", schema: buildDiscrepancySchema() } },
+      system: SYSTEM_PROMPT,
+      messages: [{
+        role: "user",
+        content: [
+          { type: "text", text: "КРЕСЛЕННЯ (фасад):" },
+          { type: "image", source: { type: "base64", media_type: drawing.mediaType, data: drawing.base64 } },
+          { type: "text", text: "РЕНДЕР:" },
+          { type: "image", source: { type: "base64", media_type: render.mediaType, data: render.base64 } },
+          { type: "text", text: "Порівняй елементи фасаду за інструкціями в системному промпті і поверни JSON зі списком невідповідностей." }
+        ]
+      }]
+    };
+    var res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-api-key": settings.anthropicApiKey,
+        "anthropic-version": "2023-06-01",
+        "anthropic-dangerous-direct-browser-access": "true"
+      },
+      body: JSON.stringify(body)
+    });
+    var json = await res.json().catch(function () { return null; });
+    if (!res.ok) {
+      var msg = (json && json.error && json.error.message) || (res.status + " " + res.statusText);
+      throw new Error(msg);
+    }
+    if (json.stop_reason === "refusal") {
+      throw new Error("Модель відмовилась обробити запит" + (json.stop_details && json.stop_details.explanation ? ": " + json.stop_details.explanation : "."));
+    }
+    var textBlock = (json.content || []).find(function (b) { return b.type === "text"; });
+    if (!textBlock) throw new Error("Порожня відповідь від AI.");
+    var parsed = JSON.parse(textBlock.text);
+    return (parsed.discrepancies || []).map(function (d) {
+      return {
+        element_name: d.element_name,
+        element_type: d.element_type,
+        error_type: d.error_type,
+        description: d.description,
+        confidence: Math.max(0, Math.min(1, d.confidence)),
+        drawing_bbox: d.drawing_bbox,
+        render_bbox: d.render_bbox
+      };
+    });
+  }
+
+  function openSettingsModal() {
+    var root = document.getElementById("global-modal-root");
+    var s = loadSettings();
+    root.innerHTML =
+      '<div class="modal-backdrop" id="settings-backdrop">' +
+        '<div class="modal">' +
+          '<h3 style="margin:0 0 2px;">⚙ AI-налаштування</h3>' +
+          '<p class="muted" style="margin:0 0 14px;">Ключ зберігається лише у localStorage цього браузера — ніколи не потрапляє в git чи до розробника.</p>' +
+          '<div class="field"><label>Anthropic API-ключ</label><input type="password" id="s-key" placeholder="sk-ant-..." value="' + esc(s.anthropicApiKey) + '"></div>' +
+          '<div class="field"><label>Модель</label><input type="text" id="s-model" value="' + esc(s.model) + '"></div>' +
+          '<p class="faint" style="font-size:11px; margin:-6px 0 14px;">Без ключа застосунок працює на мок-даних. З ключем — реальний виклик Claude Vision (тільки для завантажених JPG/PNG, не для демо-SVG). Отримати ключ: console.anthropic.com/settings/keys</p>' +
+          '<div class="row" style="justify-content:space-between;">' +
+            '<button class="btn" id="s-clear" style="border-color:#fecaca; color:var(--red);">Видалити ключ</button>' +
+            '<div class="row">' +
+              '<button class="btn" id="s-cancel">Скасувати</button>' +
+              '<button class="btn btn-primary" id="s-save">Зберегти</button>' +
+            '</div>' +
+          '</div>' +
+        '</div>' +
+      '</div>';
+    document.getElementById("s-cancel").onclick = function () { root.innerHTML = ""; };
+    document.getElementById("settings-backdrop").onclick = function (e) { if (e.target.id === "settings-backdrop") root.innerHTML = ""; };
+    document.getElementById("s-clear").onclick = function () {
+      var ok = saveSettings({ anthropicApiKey: "", model: DEFAULT_MODEL });
+      if (!ok) { toast("Не вдалося очистити налаштування — localStorage недоступний у цьому вікні."); return; }
+      root.innerHTML = "";
+      updateAiBadge();
+      toast("Ключ видалено.");
+    };
+    document.getElementById("s-save").onclick = function () {
+      var key = document.getElementById("s-key").value.trim();
+      var model = document.getElementById("s-model").value.trim() || DEFAULT_MODEL;
+      if (!key) { toast("Введіть ключ або натисніть «Видалити ключ», щоб лишитись на моку."); return; }
+      var ok = saveSettings({ anthropicApiKey: key, model: model });
+      if (!ok) {
+        toast("Не вдалося зберегти — localStorage недоступний у цьому вікні перегляду. Відкрийте index.html напряму у звичайній вкладці браузера (не у вбудованій панелі прев'ю).");
+        return;
+      }
+      root.innerHTML = "";
+      updateAiBadge();
+      toast("Ключ збережено. Реальний AI активовано.");
+    };
+  }
+
+  // ---------- state ----------
+  var STORAGE_KEY = "renderqc_state_v1";
+  var state = loadState();
+
+  function freshState() {
+    return { projects: [], assets: [], runs: [], discrepancies: [], seq: { project:0, asset:0, run:0, discrepancy:0 } };
+  }
+  function loadState() {
+    try {
+      var raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return freshState();
+      var parsed = JSON.parse(raw);
+      if (!parsed.seq) return freshState();
+      return parsed;
+    } catch (e) { return freshState(); }
+  }
+  function saveState() {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
+    catch (e) { toast("Локальне сховище переповнене — зображення завеликі. Спробуйте менші файли."); }
+  }
+  function nextId(kind) { state.seq[kind] += 1; return state.seq[kind]; }
+
+  function findProject(id) { return state.projects.find(function (p) { return p.id === id; }); }
+  function findAsset(id) { return state.assets.find(function (a) { return a.id === id; }); }
+  function findRun(id) { return state.runs.find(function (r) { return r.id === id; }); }
+  function assetsOf(projectId, kind) {
+    return state.assets.filter(function (a) { return a.project_id === projectId && (!kind || a.kind === kind); });
+  }
+  function discrepanciesOf(runId) { return state.discrepancies.filter(function (d) { return d.run_id === runId; }); }
+
+  function calcMetrics(discs) {
+    var tp = 0, fp = 0, fn = 0, unreviewed = 0;
+    discs.forEach(function (d) {
+      if (d.review_status === "tp") tp++;
+      else if (d.review_status === "fp") fp++;
+      else if (d.review_status === "fn") fn++;
+      else unreviewed++;
+    });
+    var precision = (tp + fp) > 0 ? tp / (tp + fp) : 0;
+    var recall = (tp + fn) > 0 ? tp / (tp + fn) : 0;
+    var f1 = (precision + recall) > 0 ? (2 * precision * recall) / (precision + recall) : 0;
+    return { tp:tp, fp:fp, fn:fn, unreviewed:unreviewed, total:discs.length, precision:precision, recall:recall, f1:f1 };
+  }
+
+  // ---------- demo seed images (inline SVG data URIs) ----------
+  function houseSvg(kind) {
+    if (kind === "drawing") {
+      return "data:image/svg+xml;utf8," + encodeURIComponent(
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 220">' +
+        '<rect x="0" y="0" width="300" height="220" fill="#eef2f7"/>' +
+        '<rect x="30" y="60" width="240" height="140" fill="none" stroke="#4a5568" stroke-width="1.5"/>' +
+        '<polygon points="20,60 150,10 280,60" fill="none" stroke="#4a5568" stroke-width="1.5"/>' +
+        '<rect x="55" y="90" width="30" height="40" fill="none" stroke="#4a5568"/>' +
+        '<rect x="105" y="90" width="30" height="40" fill="none" stroke="#4a5568"/>' +
+        '<rect x="185" y="90" width="30" height="40" fill="none" stroke="#4a5568"/>' +
+        '<rect x="225" y="90" width="30" height="40" fill="none" stroke="#4a5568"/>' +
+        '<rect x="140" y="150" width="30" height="50" fill="none" stroke="#4a5568"/>' +
+        '<rect x="120" y="25" width="18" height="22" fill="none" stroke="#4a5568"/>' +
+        '<line x1="30" y1="60" x2="270" y2="60" stroke="#4a5568" stroke-width="1"/>' +
+        '</svg>'
+      );
+    }
+    return "data:image/svg+xml;utf8," + encodeURIComponent(
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 220">' +
+      '<rect x="0" y="0" width="300" height="220" fill="#cfe0f0"/>' +
+      '<rect x="0" y="190" width="300" height="30" fill="#a9c98f"/>' +
+      '<rect x="30" y="60" width="240" height="140" fill="#d8cfc0"/>' +
+      '<polygon points="20,60 150,10 280,60" fill="#8a5a44"/>' +
+      '<rect x="55" y="90" width="30" height="40" fill="#6d95b8"/>' +
+      '<rect x="105" y="90" width="30" height="40" fill="#6d95b8"/>' +
+      '<rect x="185" y="90" width="30" height="40" fill="#6d95b8"/>' +
+      '<rect x="140" y="150" width="30" height="50" fill="#7a5233"/>' +
+      '</svg>'
+    );
+  }
+
+  function seedDemoProject() {
+    var pid = nextId("project");
+    state.projects.unshift({ id: pid, name: "Демо-проєкт · 29 East 64th St", created_at: new Date().toISOString() });
+    var drawId = nextId("asset");
+    state.assets.unshift({ id: drawId, project_id: pid, kind: "drawing", name: "elevation-north.svg", dataUrl: houseSvg("drawing") });
+    var renderId = nextId("asset");
+    state.assets.unshift({ id: renderId, project_id: pid, kind: "render", name: "render-01.svg", dataUrl: houseSvg("render") });
+    saveState();
+    return pid;
+  }
+
+  // ---------- routing ----------
+  function parseHash() {
+    var h = location.hash.replace(/^#/, "") || "/";
+    var parts = h.split("/").filter(Boolean);
+    return parts;
+  }
+  window.addEventListener("hashchange", render);
+  window.addEventListener("DOMContentLoaded", render);
+  window.addEventListener("DOMContentLoaded", function () {
+    updateAiBadge();
+    document.getElementById("settings-btn").onclick = openSettingsModal;
+  });
+
+  function navigate(path) { location.hash = path; }
+
+  // ---------- toast ----------
+  var toastTimer = null;
+  function toast(msg) {
+    var el = document.getElementById("toast");
+    if (el) el.remove();
+    el = document.createElement("div");
+    el.id = "toast"; el.className = "toast"; el.textContent = msg;
+    document.body.appendChild(el);
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { el.remove(); }, 2600);
+  }
+
+  // ---------- image resize helper ----------
+  function fileToResizedDataUrl(file, maxW, cb) {
+    var reader = new FileReader();
+    reader.onload = function (e) {
+      var img = new Image();
+      img.onload = function () {
+        var scale = Math.min(1, maxW / img.width);
+        var w = Math.round(img.width * scale), h = Math.round(img.height * scale);
+        var canvas = document.createElement("canvas");
+        canvas.width = w; canvas.height = h;
+        canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+        cb(canvas.toDataURL("image/jpeg", 0.85));
+      };
+      img.onerror = function () { cb(e.target.result); };
+      img.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+  }
+
+  // ---------- render dispatch ----------
+  function render() {
+    var parts = parseHash();
+    document.querySelectorAll(".navlink").forEach(function (a) {
+      a.classList.toggle("active", a.dataset.nav === "/" && parts.length === 0);
+    });
+    var app = document.getElementById("app");
+    if (parts.length === 0) { app.innerHTML = ProjectsPage(); bindProjectsPage(); return; }
+    if (parts[0] === "project" && parts[2] === "history") { app.innerHTML = HistoryPage(Number(parts[1])); bindHistoryPage(Number(parts[1])); return; }
+    if (parts[0] === "project") { app.innerHTML = UploadPage(Number(parts[1])); bindUploadPage(Number(parts[1])); return; }
+    if (parts[0] === "run") { app.innerHTML = ReviewPage(Number(parts[1])); bindReviewPage(Number(parts[1])); return; }
+    app.innerHTML = "<p class='empty'>Сторінку не знайдено.</p>";
+  }
+
+  function esc(s) { var d = document.createElement("div"); d.textContent = s == null ? "" : String(s); return d.innerHTML; }
+
+  // ---------- Projects page ----------
+  function ProjectsPage() {
+    var rows = state.projects.map(function (p) {
+      return '<li><div class="list-item" data-open-project="' + p.id + '">' +
+        '<span style="font-weight:600;">' + esc(p.name) + '</span>' +
+        '<span class="faint" style="font-size:11px;">' + new Date(p.created_at).toLocaleDateString() + '</span>' +
+        '</div></li>';
+    }).join("");
+    return (
+      '<div style="max-width:640px;">' +
+        '<h1>Проєкти</h1>' +
+        '<p class="muted" style="margin-bottom:16px;">Порівняння архітектурних рендерів із кресленнями — семантично, без перевірки розмірів.</p>' +
+        '<div class="row" style="margin-bottom:12px;">' +
+          '<input type="text" id="new-project-name" placeholder="Назва проєкту, напр. 29 East 64th St" style="flex:1;">' +
+          '<button class="btn btn-primary" id="create-project-btn">+ Новий проєкт</button>' +
+        '</div>' +
+        '<button class="btn btn-sm" id="seed-demo-btn" style="margin-bottom:16px;">✨ Завантажити демо-проєкт (щоб одразу побачити, як усе працює)</button>' +
+        (state.projects.length === 0
+          ? '<p class="empty">Проєктів ще немає. Створіть перший вище або натисніть «Завантажити демо-проєкт».</p>'
+          : '<ul class="list card">' + rows + '</ul>') +
+      '</div>'
+    );
+  }
+  function bindProjectsPage() {
+    document.getElementById("create-project-btn").onclick = function () {
+      var input = document.getElementById("new-project-name");
+      var name = input.value.trim();
+      if (!name) return;
+      var id = nextId("project");
+      state.projects.unshift({ id: id, name: name, created_at: new Date().toISOString() });
+      saveState();
+      navigate("/project/" + id);
+    };
+    document.getElementById("seed-demo-btn").onclick = function () {
+      var id = seedDemoProject();
+      navigate("/project/" + id);
+    };
+    document.querySelectorAll("[data-open-project]").forEach(function (el) {
+      el.onclick = function () { navigate("/project/" + el.dataset.openProject); };
+    });
+  }
+
+  // ---------- Upload page ----------
+  function AssetPicker(title, kind, projectId, selectedId) {
+    var assets = assetsOf(projectId, kind);
+    var thumbs = assets.map(function (a) {
+      var img = a.dataUrl ? '<img src="' + a.dataUrl + '">' : '<div class="ph">' + esc((a.name.split(".").pop() || "").toUpperCase()) + '</div>';
+      return '<button class="thumb ' + (a.id === selectedId ? "selected" : "") + '" data-select-asset="' + a.id + '" data-kind="' + kind + '">' +
+        img + '<div class="cap">' + esc(a.name) + '</div></button>';
+    }).join("");
+    return (
+      '<div class="card" style="padding:14px;">' +
+        '<div class="row" style="justify-content:space-between; margin-bottom:10px;">' +
+          '<h3 style="margin:0; font-size:14px;">' + esc(title) + '</h3>' +
+          '<label class="btn btn-sm" style="cursor:pointer;">+ Завантажити<input type="file" accept="image/*" data-upload-kind="' + kind + '" style="display:none;"></label>' +
+        '</div>' +
+        (assets.length === 0 ? '<p class="muted">Немає завантажених файлів.</p>' : '<div class="thumbgrid">' + thumbs + '</div>') +
+      '</div>'
+    );
+  }
+  function UploadPage(projectId) {
+    var project = findProject(projectId);
+    if (!project) return "<p class='empty'>Проєкт не знайдено. <a href='#/'>До проєктів</a></p>";
+    return (
+      '<div>' +
+        '<div class="row" style="justify-content:space-between; margin-bottom:16px;">' +
+          '<div><a href="#/" class="faint" style="font-size:11px;">&larr; Проєкти</a><h1>' + esc(project.name) + '</h1></div>' +
+          '<a href="#/project/' + projectId + '/history" class="btn btn-sm">Історія перевірок</a>' +
+        '</div>' +
+        '<div class="grid2" style="margin-bottom:16px;" id="picker-container"></div>' +
+        '<button class="btn btn-primary" id="run-analysis-btn">Запустити перевірку відповідності</button>' +
+      '</div>'
+    );
+  }
+  var uploadSelection = {};
+  function bindUploadPage(projectId) {
+    var renders = assetsOf(projectId, "render");
+    var drawings = assetsOf(projectId, "drawing");
+    if (uploadSelection.projectId !== projectId) {
+      uploadSelection = { projectId: projectId, renderId: renders[0] ? renders[0].id : null, drawingId: drawings[0] ? drawings[0].id : null };
+    }
+    refreshPicker();
+
+    function refreshPicker() {
+      var container = document.getElementById("picker-container");
+      container.innerHTML =
+        AssetPicker("Рендери", "render", projectId, uploadSelection.renderId) +
+        AssetPicker("Креслення", "drawing", projectId, uploadSelection.drawingId);
+      container.querySelectorAll("[data-select-asset]").forEach(function (el) {
+        el.onclick = function () {
+          var kind = el.dataset.kind, id = Number(el.dataset.selectAsset);
+          if (kind === "render") uploadSelection.renderId = id; else uploadSelection.drawingId = id;
+          refreshPicker();
+        };
+      });
+      container.querySelectorAll("[data-upload-kind]").forEach(function (input) {
+        input.onchange = function () {
+          var file = input.files[0];
+          if (!file) return;
+          var kind = input.dataset.uploadKind;
+          fileToResizedDataUrl(file, 1200, function (dataUrl) {
+            var id = nextId("asset");
+            state.assets.unshift({ id: id, project_id: projectId, kind: kind, name: file.name, dataUrl: dataUrl });
+            if (kind === "render") uploadSelection.renderId = id; else uploadSelection.drawingId = id;
+            saveState();
+            refreshPicker();
+            toast("Файл завантажено.");
+          });
+        };
+      });
+    }
+
+    var runBtn = document.getElementById("run-analysis-btn");
+    var settings = loadSettings();
+    runBtn.textContent = settings.anthropicApiKey
+      ? "Запустити перевірку відповідності (🤖 реальний AI)"
+      : "Запустити перевірку відповідності (🎲 мок)";
+    runBtn.onclick = async function () {
+      if (!uploadSelection.renderId || !uploadSelection.drawingId) { toast("Оберіть і рендер, і креслення."); return; }
+      var runId = nextId("run");
+      var renderAsset = findAsset(uploadSelection.renderId);
+      var drawingAsset = findAsset(uploadSelection.drawingId);
+      state.runs.unshift({ id: runId, project_id: projectId, render_asset_id: uploadSelection.renderId, drawing_asset_id: uploadSelection.drawingId, created_at: new Date().toISOString() });
+
+      var findings;
+      var s = loadSettings();
+      if (s.anthropicApiKey) {
+        runBtn.disabled = true;
+        runBtn.textContent = "🤖 Аналізуємо через Claude Vision…";
+        try {
+          findings = await callClaudeVision(drawingAsset, renderAsset, s);
+        } catch (err) {
+          toast("Реальний AI недоступний (" + err.message + ") — використано мок-дані.");
+          findings = runComparison(runId);
+        }
+      } else {
+        findings = runComparison(runId);
+      }
+
+      findings.forEach(function (f) {
+        var did = nextId("discrepancy");
+        state.discrepancies.push(Object.assign({ id: did, run_id: runId, review_status: "unreviewed", is_user_added: false, created_at: new Date().toISOString() }, f));
+      });
+      saveState();
+      navigate("/run/" + runId);
+    };
+  }
+
+  // ---------- Review page ----------
+  function ImagePanel(label, asset, discs, bboxKey, activeId) {
+    var boxes = discs.map(function (d) {
+      var box = d[bboxKey];
+      if (!box) return "";
+      var color = STATUS_COLOR[d.review_status];
+      var active = d.id === activeId;
+      return '<rect x="' + (box.x*100) + '" y="' + (box.y*100) + '" width="' + (box.w*100) + '" height="' + (box.h*100) + '" ' +
+        'fill="' + (active ? color+"33" : "transparent") + '" stroke="' + color + '" stroke-width="' + (active?1.3:0.7) + '" vector-effect="non-scaling-stroke" ' +
+        'style="cursor:pointer;" data-select-disc="' + d.id + '"></rect>';
+    }).join("");
+    var imgHtml = asset && asset.dataUrl ? '<img src="' + asset.dataUrl + '">' : '<div class="empty">Немає зображення</div>';
+    return (
+      '<div class="card" style="overflow:hidden;">' +
+        '<div class="imgpanel-head">' + esc(label) + '</div>' +
+        '<div class="imgwrap">' + imgHtml +
+          '<svg class="overlay" viewBox="0 0 100 100" preserveAspectRatio="none">' + boxes + '</svg>' +
+        '</div>' +
+      '</div>'
+    );
+  }
+  function DiscCard(d, active) {
+    var statusBadge = '<span class="badge" style="color:' + STATUS_COLOR[d.review_status] + '; background:' + STATUS_BG[d.review_status] + ';">' + STATUS_LABEL[d.review_status] + '</span>';
+    var confOrManual = d.is_user_added ? "додано вручну" : ("Впевненість: " + Math.round(d.confidence * 100) + "%");
+    return (
+      '<div class="disc-card ' + (active ? "active" : "") + '" data-select-disc="' + d.id + '">' +
+        '<div class="disc-top">' +
+          '<div><div class="disc-name">' + esc(d.element_name) + '</div><div class="disc-type">' + esc(ERROR_TYPE_LABEL[d.error_type] || d.error_type) + '</div></div>' +
+          statusBadge +
+        '</div>' +
+        '<p class="disc-desc">' + esc(d.description) + '</p>' +
+        '<div class="disc-bottom">' +
+          '<span class="faint" style="font-size:11px;">' + confOrManual + '</span>' +
+          '<div class="row" style="gap:4px;" data-stop-select="1">' +
+            '<button class="iconbtn ' + (d.review_status==="tp"?"on-tp":"") + '" title="True Positive" data-review="' + d.id + '" data-status="tp">✅</button>' +
+            '<button class="iconbtn ' + (d.review_status==="fp"?"on-fp":"") + '" title="False Positive" data-review="' + d.id + '" data-status="fp">❌</button>' +
+          '</div>' +
+        '</div>' +
+      '</div>'
+    );
+  }
+  function ReviewPage(runId) {
+    var run = findRun(runId);
+    if (!run) return "<p class='empty'>Перевірку не знайдено. <a href='#/'>До проєктів</a></p>";
+    return (
+      '<div>' +
+        '<div class="row" style="justify-content:space-between; margin-bottom:16px;">' +
+          '<div><a href="#/project/' + run.project_id + '" class="faint" style="font-size:11px;">&larr; До проєкту</a><h1>Перевірка #' + run.id + '</h1></div>' +
+          '<div class="row">' +
+            '<button class="btn btn-sm" id="add-manual-btn">➕ Додати пропущену помилку</button>' +
+            '<button class="btn btn-sm" id="export-csv-btn">⬇ Експорт CSV</button>' +
+          '</div>' +
+        '</div>' +
+        '<div class="card" id="metrics-panel" style="margin-bottom:14px;"></div>' +
+        '<div class="reviewgrid">' +
+          '<div id="drawing-panel"></div>' +
+          '<div id="render-panel"></div>' +
+          '<div>' +
+            '<div class="filters">' +
+              '<select id="filter-type"><option value="">Усі типи елементів</option>' + ELEMENT_TYPES.map(function(t){return '<option value="'+t+'">'+t.replace(/_/g," ")+'</option>';}).join("") + '</select>' +
+              '<select id="filter-status"><option value="">Усі статуси</option>' + Object.keys(STATUS_LABEL).map(function(s){return '<option value="'+s+'">'+STATUS_LABEL[s]+'</option>';}).join("") + '</select>' +
+            '</div>' +
+            '<div class="row" style="justify-content:space-between; margin-bottom:8px;">' +
+              '<span class="faint" id="disc-count" style="font-size:11px;"></span>' +
+              '<div class="row" style="gap:4px;"><button class="btn btn-sm" id="prev-btn">&larr; Попередня</button><button class="btn btn-sm" id="next-btn">Наступна &rarr;</button></div>' +
+            '</div>' +
+            '<div id="disc-list" style="max-height:70vh; overflow-y:auto; padding-right:2px;"></div>' +
+          '</div>' +
+        '</div>' +
+        '<div id="modal-root"></div>' +
+      '</div>'
+    );
+  }
+  var reviewUi = {};
+  function bindReviewPage(runId) {
+    var run = findRun(runId);
+    if (!run) return;
+    if (reviewUi.runId !== runId) reviewUi = { runId: runId, activeId: null, filterType: "", filterStatus: "" };
+
+    function currentList() {
+      return discrepanciesOf(runId).filter(function (d) {
+        return (!reviewUi.filterType || d.element_type === reviewUi.filterType) &&
+               (!reviewUi.filterStatus || d.review_status === reviewUi.filterStatus);
+      });
+    }
+
+    function repaint() {
+      var renderAsset = findAsset(run.render_asset_id);
+      var drawingAsset = findAsset(run.drawing_asset_id);
+      var all = discrepanciesOf(runId);
+      var list = currentList();
+      if (!reviewUi.activeId && list[0]) reviewUi.activeId = list[0].id;
+
+      document.getElementById("metrics-panel").innerHTML = MetricsHtml(calcMetrics(all));
+      document.getElementById("drawing-panel").innerHTML = ImagePanel("Креслення", drawingAsset, all, "drawing_bbox", reviewUi.activeId);
+      document.getElementById("render-panel").innerHTML = ImagePanel("Рендер", renderAsset, all, "render_bbox", reviewUi.activeId);
+      document.getElementById("disc-count").textContent = list.length + " знайдено";
+      document.getElementById("disc-list").innerHTML = list.length
+        ? list.map(function (d) { return DiscCard(d, d.id === reviewUi.activeId); }).join("")
+        : '<p class="empty">Немає результатів за поточними фільтрами.</p>';
+
+      document.querySelectorAll("[data-select-disc]").forEach(function (el) {
+        el.addEventListener("click", function (e) {
+          if (e.target.closest("[data-stop-select]")) return;
+          reviewUi.activeId = Number(el.dataset.selectDisc);
+          repaint();
+        });
+      });
+      document.querySelectorAll("[data-review]").forEach(function (btn) {
+        btn.onclick = function () {
+          var id = Number(btn.dataset.review), status = btn.dataset.status;
+          var d = state.discrepancies.find(function (x) { return x.id === id; });
+          d.review_status = status; d.reviewed_at = new Date().toISOString();
+          saveState();
+          repaint();
+        };
+      });
+    }
+
+    document.getElementById("filter-type").onchange = function (e) { reviewUi.filterType = e.target.value; repaint(); };
+    document.getElementById("filter-status").onchange = function (e) { reviewUi.filterStatus = e.target.value; repaint(); };
+    document.getElementById("prev-btn").onclick = function () { step(-1); };
+    document.getElementById("next-btn").onclick = function () { step(1); };
+    function step(delta) {
+      var list = currentList();
+      if (!list.length) return;
+      var idx = list.findIndex(function (d) { return d.id === reviewUi.activeId; });
+      idx = (idx + delta + list.length) % list.length;
+      reviewUi.activeId = list[idx].id;
+      repaint();
+    }
+
+    document.getElementById("export-csv-btn").onclick = function () { exportCsv(runId); };
+    document.getElementById("add-manual-btn").onclick = function () { openAddModal(runId, repaint); };
+
+    repaint();
+  }
+  function MetricsHtml(m) {
+    function stat(v, l, color) { return '<div class="stat"><div class="v" style="color:' + (color||"var(--text)") + ';">' + v + '</div><div class="l">' + l + '</div></div>'; }
+    return '<div class="metrics">' +
+      stat(m.precision.toFixed(2), "Precision", "var(--brand-700)") +
+      stat(m.recall.toFixed(2), "Recall", "var(--brand-700)") +
+      stat(m.f1.toFixed(2), "F1-score", "var(--brand-700)") +
+      stat(m.tp, "TP", "var(--green)") +
+      stat(m.fp, "FP", "var(--red)") +
+      stat(m.fn, "FN", "var(--purple)") +
+    '</div>';
+  }
+
+  function openAddModal(runId, onDone) {
+    var root = document.getElementById("modal-root");
+    root.innerHTML =
+      '<div class="modal-backdrop" id="modal-backdrop">' +
+        '<div class="modal">' +
+          '<h3 style="margin:0 0 2px;">➕ Додати пропущену AI помилку (FN)</h3>' +
+          '<p class="muted" style="margin:0 0 14px;">Ви знайшли невідповідність, яку AI не виявив.</p>' +
+          '<div class="field"><label>Назва елемента</label><input type="text" id="m-name" placeholder="напр. Window W-07"></div>' +
+          '<div class="grid2">' +
+            '<div class="field"><label>Тип елемента</label><select id="m-type">' + ELEMENT_TYPES.map(function(t){return '<option value="'+t+'">'+t.replace(/_/g," ")+'</option>';}).join("") + '</select></div>' +
+            '<div class="field"><label>Тип помилки</label><select id="m-error">' + Object.keys(ERROR_TYPE_LABEL).map(function(t){return '<option value="'+t+'">'+ERROR_TYPE_LABEL[t]+'</option>';}).join("") + '</select></div>' +
+          '</div>' +
+          '<div class="field"><label>Опис</label><textarea id="m-desc" rows="3" placeholder="Що саме не відповідає кресленню?"></textarea></div>' +
+          '<div class="row" style="justify-content:flex-end;">' +
+            '<button class="btn" id="m-cancel">Скасувати</button>' +
+            '<button class="btn" style="background:var(--purple); border-color:var(--purple); color:#fff;" id="m-submit">Додати як FN</button>' +
+          '</div>' +
+        '</div>' +
+      '</div>';
+    document.getElementById("m-cancel").onclick = function () { root.innerHTML = ""; };
+    document.getElementById("modal-backdrop").onclick = function (e) { if (e.target.id === "modal-backdrop") root.innerHTML = ""; };
+    document.getElementById("m-submit").onclick = function () {
+      var name = document.getElementById("m-name").value.trim();
+      var desc = document.getElementById("m-desc").value.trim();
+      if (!name || !desc) { toast("Заповніть назву й опис."); return; }
+      var id = nextId("discrepancy");
+      state.discrepancies.push({
+        id: id, run_id: runId,
+        element_name: name,
+        element_type: document.getElementById("m-type").value,
+        error_type: document.getElementById("m-error").value,
+        description: desc, confidence: 1.0,
+        drawing_bbox: null, render_bbox: null,
+        review_status: "fn", is_user_added: true,
+        created_at: new Date().toISOString(), reviewed_at: new Date().toISOString()
+      });
+      saveState();
+      root.innerHTML = "";
+      reviewUi.activeId = id;
+      onDone();
+    };
+  }
+
+  function exportCsv(runId) {
+    var discs = discrepanciesOf(runId);
+    var m = calcMetrics(discs);
+    var rows = [["id","element_name","element_type","error_type","description","confidence","review_status","is_user_added","created_at"]];
+    discs.forEach(function (d) {
+      rows.push([d.id, d.element_name, d.element_type, d.error_type, d.description, d.confidence, d.review_status, d.is_user_added, d.created_at]);
+    });
+    rows.push([]); rows.push(["Precision", m.precision.toFixed(4)]); rows.push(["Recall", m.recall.toFixed(4)]);
+    rows.push(["F1", m.f1.toFixed(4)]); rows.push(["TP", m.tp]); rows.push(["FP", m.fp]); rows.push(["FN", m.fn]);
+    var csv = rows.map(function (r) {
+      return r.map(function (v) {
+        var s = v == null ? "" : String(v);
+        return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+      }).join(",");
+    }).join("\n");
+    var blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "run_" + runId + "_report.csv";
+    document.body.appendChild(a); a.click(); a.remove();
+  }
+
+  // ---------- History page ----------
+  function HistoryPage(projectId) {
+    var project = findProject(projectId);
+    if (!project) return "<p class='empty'>Проєкт не знайдено. <a href='#/'>До проєктів</a></p>";
+    var runs = state.runs.filter(function (r) { return r.project_id === projectId; });
+    var rowsHtml = runs.map(function (r) {
+      var m = calcMetrics(discrepanciesOf(r.id));
+      return '<tr data-open-run="' + r.id + '">' +
+        '<td>#' + r.id + '</td>' +
+        '<td class="faint">' + new Date(r.created_at).toLocaleString() + '</td>' +
+        '<td>' + m.precision.toFixed(2) + '</td>' +
+        '<td>' + m.recall.toFixed(2) + '</td>' +
+        '<td>' + m.f1.toFixed(2) + '</td>' +
+        '<td class="faint">' + m.tp + ' / ' + m.fp + ' / ' + m.fn + '</td>' +
+      '</tr>';
+    }).join("");
+    return (
+      '<div>' +
+        '<a href="#/project/' + projectId + '" class="faint" style="font-size:11px;">&larr; До проєкту</a>' +
+        '<h1>Історія перевірок — ' + esc(project.name) + '</h1>' +
+        (runs.length === 0 ? '<p class="empty">Перевірок ще не було.</p>' :
+          '<table class="table card" style="margin-top:12px;"><thead><tr><th>Перевірка</th><th>Дата</th><th>Precision</th><th>Recall</th><th>F1</th><th>TP / FP / FN</th></tr></thead><tbody>' + rowsHtml + '</tbody></table>') +
+      '</div>'
+    );
+  }
+  function bindHistoryPage() {
+    document.querySelectorAll("[data-open-run]").forEach(function (el) {
+      el.onclick = function () { navigate("/run/" + el.dataset.openRun); };
+    });
+  }
+})();
+</script>
+</body>
+</html>
