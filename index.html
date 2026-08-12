@@ -4,6 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Render QC — Architectural Compliance Check</title>
+<script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
 <style>
   :root {
     --brand-50:#eef4ff; --brand-100:#dbe6fe; --brand-500:#3b6fed; --brand-600:#2f57c9; --brand-700:#2646a3;
@@ -19,7 +20,7 @@
   .brand { font-weight:700; font-size:16px; color:var(--brand-700); }
   .navlink { padding:7px 12px; border-radius:8px; font-size:13px; font-weight:500; color:var(--muted); }
   .navlink.active, .navlink:hover { background:var(--brand-50); color:var(--brand-700); }
-  main { max-width:1180px; margin:0 auto; padding:20px 16px 60px; }
+  main { max-width:1320px; margin:0 auto; padding:20px 16px 60px; }
   h1 { font-size:20px; margin:0 0 4px; }
   .muted { color:var(--muted); font-size:13px; }
   .faint { color:var(--faint); }
@@ -39,15 +40,20 @@
   .list-item { display:flex; align-items:center; justify-content:space-between; padding:12px 16px; cursor:pointer; }
   .list-item:hover { background:#f8fafc; }
   .badge { font-size:10px; font-weight:600; padding:2px 8px; border-radius:999px; white-space:nowrap; }
-  .thumbgrid { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
-  .thumb { border:1px solid var(--border); border-radius:8px; overflow:hidden; text-align:left; cursor:pointer; background:#fff; padding:0; }
-  .thumb.selected { outline:2px solid var(--brand-600); outline-offset:-1px; }
-  .thumb img { width:100%; height:80px; object-fit:cover; display:block; }
-  .thumb .ph { width:100%; height:80px; background:#f1f5f9; display:flex; align-items:center; justify-content:center; font-size:11px; color:var(--faint); }
-  .thumb .cap { font-size:11px; padding:4px 6px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .metrics { display:grid; grid-template-columns:repeat(6,1fr); gap:8px; padding:14px 8px; }
+  .uploadslot { display:block; width:100%; height:110px; border-radius:8px; overflow:hidden; }
+  .uploadslot.empty { border:1.5px dashed var(--border-strong,#cbd5e1); background:#f8fafc; display:flex; flex-direction:column; align-items:center; justify-content:center; color:var(--faint); font-size:11px; text-align:center; gap:4px; cursor:pointer; padding:8px; }
+  .uploadslot.empty:hover { background:#eef2f7; }
+  .uploadslot.empty.dragover { background:var(--brand-50); border-color:var(--brand-500); color:var(--brand-700); }
+  .uploadslot.filled { position:relative; cursor:pointer; border:1px solid var(--border); }
+  .uploadslot.filled img { width:100%; height:100%; object-fit:cover; display:block; }
+  .uploadslot.filled .ph { width:100%; height:100%; background:#f1f5f9; display:flex; align-items:center; justify-content:center; font-size:11px; color:var(--faint); }
+  .switcher { border:1px solid var(--border); border-radius:8px; margin-top:6px; overflow:hidden; }
+  .switcher-item { padding:7px 10px; font-size:12px; cursor:pointer; border-bottom:1px solid var(--border); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .switcher-item:last-child { border-bottom:none; }
+  .switcher-item:hover { background:#f8fafc; }
+  .metrics { display:grid; grid-template-columns:repeat(6,1fr); gap:8px; padding:9px 8px; }
   .metrics .stat { text-align:center; }
-  .metrics .stat .v { font-size:20px; font-weight:700; }
+  .metrics .stat .v { font-size:18px; font-weight:700; }
   .metrics .stat .l { font-size:11px; color:var(--faint); }
   .imgpanel-head { font-size:11px; font-weight:600; color:var(--muted); padding:8px 12px; border-bottom:1px solid var(--border); background:#f8fafc; }
   .imgwrap { position:relative; background:#f1f5f9; min-height:160px; }
@@ -55,7 +61,7 @@
   .imgwrap svg.overlay { position:absolute; inset:0; width:100%; height:100%; }
   .disc-card { border:1px solid var(--border); border-radius:10px; padding:10px 12px; cursor:pointer; background:#fff; }
   .disc-card.active { border-color: var(--brand-500); background: var(--brand-50); }
-  .disc-card + .disc-card { margin-top:8px; }
+  .disc-list-flat .disc-card + .disc-card { margin-top:8px; }
   .disc-top { display:flex; justify-content:space-between; align-items:flex-start; gap:8px; }
   .disc-name { font-weight:600; font-size:13px; }
   .disc-type { font-size:11px; color:var(--muted); }
@@ -76,16 +82,22 @@
   .table tr:hover td { background:#f8fafc; cursor:pointer; }
   .toast { position:fixed; bottom:20px; right:20px; background:var(--text); color:#fff; padding:10px 16px; border-radius:8px; font-size:13px; z-index:200; }
   .filters { display:flex; gap:8px; margin-bottom:10px; flex-wrap:wrap; }
-  .reviewgrid { display:grid; grid-template-columns:1fr 1fr 340px; gap:14px; align-items:start; }
-  @media (max-width: 960px) { .reviewgrid { grid-template-columns:1fr; } }
+  .reviewtop { display:grid; grid-template-columns:1fr 1fr; gap:16px; align-items:start; }
+  @media (max-width: 900px) { .reviewtop { grid-template-columns:1fr; } }
+  .disc-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(300px,1fr)); gap:10px; }
+  svg rect.hovered { stroke-width:3; }
+  .mainlayout { display:grid; grid-template-columns:260px 1fr; gap:16px; align-items:start; }
+  @media (max-width: 720px) { .mainlayout { grid-template-columns:1fr; } }
 </style>
 </head>
 <body>
 <header class="topbar">
   <div class="topbar-inner">
     <span class="brand">Render QC</span>
-    <a href="#/" class="navlink" data-nav="/">Проєкти</a>
-    <button id="settings-btn" class="btn btn-sm" style="margin-left:auto;">⚙ AI-налаштування</button>
+    <a href="#/" class="navlink" data-nav="/">Головна</a>
+    <a href="#/history" class="navlink" data-nav="/history">Історія та метрики</a>
+    <span class="faint" id="app-version" style="margin-left:auto; font-size:11px;" title="Версія збірки — якщо не збігається з очікуваною, браузер показує стару копію з кешу"></span>
+    <button id="settings-btn" class="btn btn-sm">⚙ AI-налаштування</button>
     <span class="faint" id="ai-mode-badge" style="font-size:11px;"></span>
   </div>
 </header>
@@ -96,10 +108,23 @@
 (function () {
   "use strict";
 
+  // Bump on every change. Shown in the header so a stale browser cache is obvious
+  // at a glance instead of being mistaken for "the fix didn't work".
+  var APP_VERSION = "v31 · виділення фасаду рамкою + код стилю (CL/CO/MH…)";
+
+  if (window.pdfjsLib) {
+    pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js";
+  }
+
   var ELEMENT_TYPES = ["window","door","garage_door","roof","roof_section","dormer_window","balcony","column","railing","stairs","canopy","terrace","facade_decor","exterior_light","gutter","downspout","chimney","other"];
   var ERROR_TYPE_LABEL = {
-    missing: "Відсутній елемент", extra: "Зайвий елемент", wrong_type: "Невірний тип",
-    orientation_mismatch: "Невірна орієнтація/напрямок", count_mismatch: "Невірна кількість секцій",
+    missing: "Відсутній елемент",
+    extra: "Зайвий елемент",
+    count_mismatch: "Невірна кількість секцій",
+    orientation_mismatch: "Невірна орієнтація/напрямок",
+    wrong_location: "Невірне розташування",
+    wrong_type: "Невірний тип",
+    material_mismatch: "Невідповідність матеріалу",
     design_mismatch: "Невідповідність дизайну"
   };
   var ERROR_TYPES = Object.keys(ERROR_TYPE_LABEL);
@@ -211,77 +236,435 @@
     return { mediaType: m[1], base64: m[2] };
   }
 
-  var SYSTEM_PROMPT =
-    "Ти - експерт з архітектурного QA. Твоя задача - порівняти архітектурний рендер із кресленням фасаду " +
-    "і знайти СЕМАНТИЧНІ невідповідності в архітектурних елементах (вікна, двері, гаражні ворота, дах, " +
-    "секції даху, мансардні вікна, балкони, колони, перила, сходи, навіси, тераси, декоративні елементи " +
-    "фасаду, зовнішні світильники, ринви, водостоки, димоходи тощо).\n\n" +
-    "ДУЖЕ ВАЖЛИВО: НЕ перевіряй розміри, масштаб, пропорції чи точні координати об'єктів. Не звертай увагу " +
-    "на те, що вікно ширше на кілька міліметрів або зміщене на кілька сантиметрів. Перевіряй ЛИШЕ те, чи " +
-    "правильні елементи присутні і чи відповідають вони кресленню за типом/конфігурацією/орієнтацією.\n\n" +
-    "Для кожної знайденої невідповідності визнач: назву елемента, тип елемента (з фіксованого списку), " +
-    "тип помилки (missing - є на кресленні, немає на рендері; extra - зайвий на рендері; wrong_type - " +
-    "невірний тип/дизайн; orientation_mismatch - невірний напрямок відкривання/орієнтація; count_mismatch - " +
-    "невірна кількість секцій/панелей; design_mismatch - загальна невідповідність дизайну), опис українською, " +
-    "рівень впевненості (0-1), та нормалізовані (0-1 відносно ширини/висоти зображення) bounding box " +
-    "координати на кресленні і/або на рендері (null, якщо елемента немає на відповідному зображенні). " +
-    "Якщо явних невідповідностей немає, поверни порожній список.";
+  var SYSTEM_PROMPT = [
+    "Ти — експерт з архітектурного контролю якості. Твоя задача — порівняти архітектурний рендер фасаду з відповідним кресленням фасаду та знайти реальні СЕМАНТИЧНІ невідповідності в архітектурних елементах.",
+    "",
+    "1. ГОЛОВНА МЕТА",
+    "Знаходь лише ті невідповідності, для яких є конкретні візуальні докази.",
+    "Не вигадуй помилки, щоб заповнити результат. Порожній список невідповідностей є допустимим, якщо після систематичної перевірки не знайдено достатніх доказів розбіжностей.",
+    "Водночас уважно перевіряй усі категорії та не пропускай чітко видимі відмінності.",
+    "Для кожної потенційної проблеми використовуй один із трьох статусів:",
+    "- 'mismatch' — є конкретна видима невідповідність;",
+    "- 'match' — доступні для перевірки елементи збігаються;",
+    "- 'not_verifiable' — елемент неможливо надійно перевірити через перспективу, тінь, низьку якість, перекриття, рослинність, відсутність потрібного ракурсу або неоднозначність креслення.",
+    "'not_verifiable' не є помилкою і не повинен додаватися до списку невідповідностей.",
+    "Ніколи не перетворюй недостатню видимість або невпевненість на доказ помилки.",
+    "",
+    "2. ОСНОВНИЙ ПРИНЦИП ПОРІВНЯННЯ",
+    "Порівнюй семантичну відповідність архітектурних елементів: чи присутній потрібний елемент; чи відсутній зайвий елемент; чи правильний тип елемента; чи правильна його конфігурація; чи правильна орієнтація; чи правильна кількість секцій або повторюваних частин.",
+    "Не перевіряй: точні розміри; масштаб; незначні відмінності пропорцій; точні координати; незначне зміщення; перспективні спотворення; різницю, спричинену кутом камери; різницю в освітленні; незначні відмінності кольору або відтінку.",
+    "Наприклад, якщо вікно на рендері виглядає трохи ширшим або зміщеним на кілька пікселів через перспективу, це не є помилкою.",
+    "Повідомляй про неправильне розташування лише тоді, коли елемент явно: знаходиться з іншого боку дверей, вікна або архітектурної осі; належить до іншого поверху; належить до іншої секції будинку; встановлений біля іншого архітектурного елемента; має явно іншу функціональну позицію.",
+    "",
+    "3. ВІЗУАЛЬНІ ДОКАЗИ",
+    "Додавай невідповідність лише тоді, коли можеш окремо описати: 1) що видно на кресленні; 2) що видно на рендері; 3) у чому полягає конкретна суперечність.",
+    "Кожна знахідка повинна містити: 'drawing_evidence' — конкретне спостереження на кресленні; 'render_evidence' — конкретне спостереження на рендері; 'difference' — пояснення невідповідності.",
+    "Не використовуй припущення на кшталт: «ймовірно, тут має бути світильник»; «схоже, панелей може бути більше»; «можливо, елемент відсутній».",
+    "Якщо неможливо сформулювати конкретні спостереження для обох зображень, не додавай це до 'differences'. Замість цього, за потреби, додай область до 'uncertain_areas'.",
+    "",
+    "4. ДЗЕРКАЛЬНЕ ВІДОБРАЖЕННЯ",
+    "Якщо весь рендер є дзеркально відображеною версією креслення, це допустимий варіант і не є помилкою.",
+    "Спочатку визнач, чи є фасад дзеркальним відображенням. Якщо так: подумки віддзеркаль креслення або рендер; порівнюй відповідні архітектурні секції; не повідомляй про глобальну дзеркальність як про помилку.",
+    "Якщо будинок складається з кількох секцій, наприклад twin-home, порівнюй кожну секцію за її архітектурними ознаками, а не лише за позицією ліворуч або праворуч.",
+    "",
+    "5. ПЕРСПЕКТИВА ТА ВИДИМІСТЬ",
+    "Креслення фасаду є ортографічним зображенням, а рендер може бути перспективним.",
+    "Не вважай помилкою: перспективне зміщення; часткове перекриття елементів; зміну видимої ширини; зміну видимої висоти; різницю у відстанях між елементами через кут камери; елемент, який може бути прихований за колоною, дахом, рослинністю, автомобілем, меблями або іншою частиною будинку.",
+    "Якщо елемент повинен бути видимим із цього ракурсу, але його немає, це може бути 'missing'. Якщо елемент може бути прихований або знаходитися поза кадром, використовуй 'not_verifiable', а не 'missing'.",
+    "Перед тим як позначити елемент як відсутній, перевір, чи він: не знаходиться в тіні; не має темного кольору; не зливається з матеріалом фасаду; не перекритий іншим об'єктом; не спотворений перспективою; не знаходиться поза видимою частиною рендера.",
+    "",
+    "6. ІГНОРУВАННЯ СЛУЖБОВИХ ПОЗНАЧЕНЬ КРЕСЛЕННЯ",
+    "Ігноруй елементи креслення, які не є фізичними частинами будинку: розмірні лінії; стрілки; виноски; кружечки та ромбики з номерами; номери деталей; осі; лінії-вказівники; рівні; текстові пояснення; назви матеріалів; специфікації; позначки на кшталт 'TOP PLATE', 'SUB-FLR', 'T.O. WINDOW'; інші службові та монтажні позначення.",
+    "Не сприймай їх як архітектурні елементи.",
+    "Матеріали фасаду визначай за видимим графічним позначенням, штрихуванням, текстурою або чітко видимою структурою поверхні, а не за випадковими службовими лініями.",
+    "",
+    "7. КАТЕГОРІЇ ПЕРЕВІРКИ",
+    "Послідовно перевір усі наведені категорії. Для кожної категорії внутрішньо визнач один зі статусів: 'match'; 'mismatch'; 'not_verifiable'. Не потрібно створювати помилку для кожної категорії.",
+    "",
+    "7.1. ВІКНА. Перевір: наявність; кількість вікон у кожній секції фасаду; тип вікна; глухе чи відчинюване; розпашне; горизонтально розсувне; вертикально розсувне вгору-вниз; напрямок або конфігурацію відкривання, якщо це чітко видно; кількість реальних секцій скла; кількість імпостів; наявність декоративної решітки на склі; форму вікна; арочну або прямокутну верхню частину.",
+    "Рахуй лише реальні секції всередині скляної рами. Не рахуй ставні як частину вікна. Не визначай напрямок відкривання, якщо він не може бути надійно встановлений із креслення або рендера.",
+    "",
+    "7.2. ВХІДНІ ТА ЗОВНІШНІ ДВЕРІ. Перевір: наявність; тип дверей; кількість стулок; тип і конфігурацію фільонок; наявність скління; форму скління; кількість скляних секцій; наявність бічних вставок; наявність верхньої вставки; загальну конфігурацію дверного блоку.",
+    "Не вважай незначну різницю в декоративному рельєфі помилкою, якщо базовий тип дверей збігається і дрібні деталі не видно достатньо чітко.",
+    "",
+    "7.3. ГАРАЖНІ ВОРОТА. Перевір: наявність; кількість воріт; кількість стулок або отворів; малюнок панелей; кількість горизонтальних рядів; кількість вертикальних секцій; наявність вікон; конфігурацію вікон; наявність декоративних ручок; наявність декоративних завіс або петель.",
+    "Рахуй панелі систематично, ряд за рядом. Якщо точну кількість неможливо визначити через перспективу або низьку роздільну здатність, використовуй 'not_verifiable'.",
+    "",
+    "7.4. ДАХ. Перевір: наявність основних секцій даху; форму секцій; фронтони; вальмові секції; навіси; мансардні вікна; димоходи; видимі башточки або декоративні покрівельні елементи.",
+    "Не порівнюй точний кут нахилу, висоту або довжину даху. Не вважай помилкою секцію даху, яка може бути прихована через перспективу.",
+    "",
+    "7.5. БАЛКОНИ, КОЛОНИ, ПЕРИЛА ТА СХОДИ. Перевір: наявність балконів; наявність колон; кількість колон, якщо вони чітко видимі; тип колон; наявність перил; загальний дизайн перил; наявність сходів; конфігурацію сходів; огородження сходів і балконів.",
+    "Не порівнюй точну товщину колон, відстань між балясинами або точну кількість сходинок, якщо цього недостатньо видно.",
+    "",
+    "7.6. НАВІСИ, ҐАНКИ ТА ТЕРАСИ. Перевір: наявність; загальну форму; наявність даху або накриття; наявність колон; наявність огородження; відкриту або закриту конфігурацію; належність до правильної секції будинку.",
+    "",
+    "7.7. МАТЕРІАЛИ ФАСАДУ. Перевір матеріал кожної архітектурної секції окремо: перший поверх; другий поверх; фронтон; простінок; вхідна секція; гаражна секція; виступаюча секція; ліва та права частини фасаду.",
+    "Перевір: цегла; камінь; штукатурка; горизонтальний сайдинг; вертикальний сайдинг; панельне облицювання; дерев'яне облицювання; інший чітко визначений матеріал.",
+    "Не порівнюй точний колір або відтінок. Повідомляй про невідповідність лише тоді, коли тип матеріалу або напрямок сайдингу явно відрізняється. Наприклад: на кресленні цегла, а на рендері горизонтальний сайдинг; на кресленні вертикальний сайдинг, а на рендері горизонтальний; матеріал застосований до іншої секції фасаду.",
+    "",
+    "7.8. ДЕКОРАТИВНІ АРХІТЕКТУРНІ ЕЛЕМЕНТИ. Перевір: декоративні кронштейни; балки; фальш-балки; декоративні ферми; карнизні елементи; декоративні панелі; арки; молдинги; інші великі видимі декоративні елементи.",
+    "Не включай ставні до цієї категорії. Вони перевіряються окремо. Не повідомляй про дрібний декоративний елемент, якщо він недостатньо видимий на рендері.",
+    "",
+    "7.9. ЗОВНІШНІ СВІТИЛЬНИКИ. Перевір: наявність; кількість; тип, якщо він чітко розрізняється; розташування біля відповідних дверей, гаражних воріт, колон або вікон; з якого боку від дверей або воріт встановлений світильник; чи належить він до правильної секції фасаду.",
+    "Не порівнюй точну висоту в пікселях або незначне вертикальне зміщення. Позначай 'orientation_mismatch' або 'wrong_location' лише тоді, коли світильник явно: знаходиться з іншого боку дверей; знаходиться біля іншого гаражного отвору; знаходиться в іншій секції; встановлений над елементом замість збоку або навпаки.",
+    "Якщо світильник може зливатися з темним фасадом або знаходитися в тіні, не позначай його як 'missing' без достатніх доказів.",
+    "",
+    "7.10. РИНВИ ТА ВОДОСТОКИ. Перевір: наявність ринв; наявність водостоків; кількість водостоків, якщо вони чітко видимі; належність водостоків до правильної секції; загальну орієнтацію.",
+    "Не перевіряй точний маршрут, товщину або незначне зміщення водостоку. Якщо водостік може бути прихований колоною, кутом будинку, рослинністю або перспективою, використовуй 'not_verifiable'.",
+    "",
+    "7.11. СТАВНІ АБО ВІКОННИЦІ. Ставні є окремою категорією і не входять до кількості секцій вікна.",
+    "Ознаки вікна: скляна поверхня; порожній або темний прямокутник; тонка зовнішня рама; прямі лінії імпостів усередині скла.",
+    "Ознаки ставень: вузький непрозорий елемент; видима фільонка; рамка всередині рамки; ламелі; похилі повторювані лінії; суцільна текстурована панель збоку від вікна.",
+    "Перевір: наявність; кількість; з якого боку вікна вони розташовані; чи є ставні з обох боків; загальний тип ставень.",
+    "Не називай ставні боковим вікном і не рахуй їх як секцію скла. Якщо неможливо надійно визначити, чи вузький елемент є ставнею або частиною вікна, додай його до 'uncertain_areas', а не до 'differences'.",
+    "",
+    "8. ЗОБРАЖЕННЯ ТА КООРДИНАТИ",
+    "Тобі надано рівно два зображення: одне креслення і один рендер. Усі bounding box рахуй відносно того зображення, на якому ти бачиш елемент, у частках від 0 до 1 від його повної ширини і висоти.",
+    "Аркуш креслення може містити багато порожнього поля, рамку, штамп і службові написи. НІКОЛИ не став bounding box на порожню ділянку аркуша. Якщо ти не можеш точно показати пальцем на конкретний елемент — не вигадуй координати: або не додавай цю знахідку до 'differences', або віднеси її до 'uncertain_areas'.",
+    "Перед тим як вказати координати, подумки перевір: чи справді в цьому місці зображення є той елемент, про який ідеться.",
+    "",
+    "9. ТИПИ ПОМИЛОК",
+    "Використовуй тільки такі значення 'error_type':",
+    "- 'missing' — елемент є на кресленні, повинен бути видимим із цього ракурсу, але відсутній на рендері;",
+    "- 'extra' — елемент присутній на рендері, але відсутній на кресленні;",
+    "- 'count_mismatch' — неправильна кількість чітко видимих повторюваних елементів, секцій або панелей;",
+    "- 'orientation_mismatch' — неправильний напрямок відкривання, орієнтація або сторона розташування;",
+    "- 'wrong_location' — елемент знаходиться в іншій архітектурній секції або біля іншого елемента;",
+    "- 'wrong_type' — використаний інший тип архітектурного елемента;",
+    "- 'material_mismatch' — використаний інший тип матеріалу або інший напрямок сайдингу;",
+    "- 'design_mismatch' — загальний дизайн відрізняється, і жоден точніший тип помилки не підходить.",
+    "Вибирай найбільш конкретний тип. Не створюй кілька окремих знахідок для одного фізичного елемента, якщо вони описують одну й ту саму проблему.",
+    "Пріоритет вибору: 1) missing; 2) extra; 3) count_mismatch; 4) orientation_mismatch; 5) wrong_location; 6) wrong_type; 7) material_mismatch; 8) design_mismatch. 'design_mismatch' використовуй лише як останній варіант.",
+    "",
+    "10. CONFIDENCE",
+    "Значення 'confidence' повинно відображати впевненість саме в тому, що невідповідність реально існує, а не впевненість у розпізнаванні самого об'єкта. Орієнтири:",
+    "- 0.90–1.00 — відмінність очевидна, обидва елементи добре видимі;",
+    "- 0.75–0.89 — сильні візуальні докази, але є невелика неоднозначність;",
+    "- 0.60–0.74 — імовірна відмінність із конкретними доказами, але деталь видна неідеально;",
+    "- нижче 0.60 — не додавай до 'differences'; використовуй 'uncertain_areas'.",
+    "Низька якість зображення, тінь, перспектива або перекриття повинні знижувати confidence. Не використовуй низький confidence як дозвіл додавати необґрунтовані припущення.",
+    "",
+    "11. BOUNDING BOXES",
+    "Для кожної невідповідності вкажи координати bounding box У ПІКСЕЛЯХ: x1, y1 — лівий верхній кут, x2, y2 — правий нижній кут. Початок координат (0,0) — лівий верхній кут зображення, x зростає вправо, y зростає вниз.",
+    "НЕ використовуй частки від 0 до 1. Точні розміри кожного зображення в пікселях вказані в повідомленні користувача — тримайся цих діапазонів.",
+    "Використовуй 'drawing_bbox' — область елемента на кресленні; 'render_bbox' — область елемента на рендері.",
+    "Якщо елемент відсутній на одному із зображень, для цього зображення використовуй null. Наприклад: для 'missing' значення render_bbox повинно бути null; для 'extra' значення drawing_bbox повинно бути null.",
+    "Якщо знаходження елемента є очевидним, але точний bbox неможливо встановити надійно, вкажи приблизну область і зменш confidence. Не вигадуй bbox для елемента, який ти не можеш локалізувати.",
+    "",
+    "12. ФОРМАТ РЕЗУЛЬТАТУ",
+    "Поверни тільки валідний JSON без markdown, коментарів або тексту перед чи після JSON, зі структурою: comparison_summary { mirror_detected, overall_result, checked_categories[{category, status}] }, differences[{id, element_name, element_type, category, error_type, description_uk, drawing_evidence, render_evidence, difference, confidence, drawing_bbox, render_bbox}], uncertain_areas[{id, element_name, category, reason, drawing_observation, render_observation, confidence, drawing_bbox, render_bbox}].",
+    "",
+    "13. ПРАВИЛА ДЛЯ overall_result",
+    "- 'match' — не знайдено невідповідностей і немає критичних неперевірених областей;",
+    "- 'mismatch' — знайдено хоча б одну обґрунтовану невідповідність;",
+    "- 'partially_verifiable' — невідповідностей не знайдено, але одна або кілька важливих категорій не можуть бути надійно перевірені.",
+    "Наявність 'uncertain_areas' сама по собі не означає 'mismatch'.",
+    "",
+    "14. ФІНАЛЬНА САМОПЕРЕВІРКА",
+    "Перед формуванням відповіді перевір кожну знахідку:",
+    "1) Чи я чітко бачу відповідний елемент на кресленні?",
+    "2) Чи я чітко бачу відповідну область на рендері?",
+    "3) Чи може різниця бути спричинена перспективою?",
+    "4) Чи може елемент бути в тіні або перекритий?",
+    "5) Чи порівнюю я правильні секції будинку?",
+    "6) Чи врахував я можливе дзеркальне відображення?",
+    "7) Чи можу я конкретно описати, що видно на обох зображеннях?",
+    "8) Чи використав я найбільш конкретний тип помилки?",
+    "9) Чи не створив я дубльовану знахідку для того самого елемента?",
+    "10) Чи є достатні докази для confidence не нижче 0.60?",
+    "Якщо відповідь на питання 1, 2, 3, 4 або 7 викликає суттєвий сумнів, не додавай елемент до 'differences'. Додай його до 'uncertain_areas' або визнай категорію 'not_verifiable'.",
+    "Результат повинен відображати реальні візуально підтверджені відмінності, а не припущення про можливі помилки.",
+    "",
+    "Допустимі значення element_type: " + ELEMENT_TYPES.join(", ") + "."
+  ].join("\n");
 
   function buildDiscrepancySchema() {
+    // Pixel coordinates, not normalized — Anthropic's docs state Claude performs
+    // markedly worse when asked for normalized 0..1 boxes.
     var bboxSchema = {
       type: "object",
-      properties: { x: { type: "number" }, y: { type: "number" }, w: { type: "number" }, h: { type: "number" } },
-      required: ["x", "y", "w", "h"],
+      properties: {
+        x1: { type: "number" }, y1: { type: "number" },
+        x2: { type: "number" }, y2: { type: "number" }
+      },
+      required: ["x1", "y1", "x2", "y2"],
       additionalProperties: false
     };
+    var nullableBbox = { anyOf: [bboxSchema, { type: "null" }] };
     return {
       type: "object",
       properties: {
-        discrepancies: {
+        comparison_summary: {
+          type: "object",
+          properties: {
+            mirror_detected: { type: "boolean" },
+            overall_result: { type: "string", enum: ["match", "mismatch", "partially_verifiable"] },
+            checked_categories: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  category: { type: "string" },
+                  status: { type: "string", enum: ["match", "mismatch", "not_verifiable"] }
+                },
+                required: ["category", "status"],
+                additionalProperties: false
+              }
+            }
+          },
+          required: ["mirror_detected", "overall_result", "checked_categories"],
+          additionalProperties: false
+        },
+        differences: {
           type: "array",
           items: {
             type: "object",
             properties: {
+              id: { type: "string" },
               element_name: { type: "string" },
               element_type: { type: "string", enum: ELEMENT_TYPES },
+              category: { type: "string" },
               error_type: { type: "string", enum: ERROR_TYPES },
-              description: { type: "string" },
+              description_uk: { type: "string" },
+              drawing_evidence: { type: "string" },
+              render_evidence: { type: "string" },
+              difference: { type: "string" },
               confidence: { type: "number" },
-              drawing_bbox: { anyOf: [bboxSchema, { type: "null" }] },
-              render_bbox: { anyOf: [bboxSchema, { type: "null" }] }
+              drawing_bbox: nullableBbox,
+              render_bbox: nullableBbox
             },
-            required: ["element_name", "element_type", "error_type", "description", "confidence", "drawing_bbox", "render_bbox"],
+            required: ["id", "element_name", "element_type", "category", "error_type", "description_uk",
+                       "drawing_evidence", "render_evidence", "difference", "confidence",
+                       "drawing_bbox", "render_bbox"],
+            additionalProperties: false
+          }
+        },
+        uncertain_areas: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              id: { type: "string" },
+              element_name: { type: "string" },
+              category: { type: "string" },
+              reason: { type: "string" },
+              drawing_observation: { type: "string" },
+              render_observation: { type: "string" },
+              confidence: { type: "number" },
+              drawing_bbox: nullableBbox,
+              render_bbox: nullableBbox
+            },
+            required: ["id", "element_name", "category", "reason", "drawing_observation",
+                       "render_observation", "confidence", "drawing_bbox", "render_bbox"],
             additionalProperties: false
           }
         }
       },
-      required: ["discrepancies"],
+      required: ["comparison_summary", "differences", "uncertain_areas"],
       additionalProperties: false
     };
   }
 
-  async function callClaudeVision(drawingAsset, renderAsset, settings) {
-    var drawing = parseDataUrl(drawingAsset && drawingAsset.dataUrl);
-    var render = parseDataUrl(renderAsset && renderAsset.dataUrl);
-    if (!drawing || !render) {
-      throw new Error("Реальний AI підтримує лише завантажені JPG/PNG зображення (не демо-SVG).");
+  // Claude downsizes images to its native resolution before looking at them and reports
+  // coordinates in THAT space. Pre-resizing to exactly that size makes the pixel
+  // coordinates it returns land 1:1 on the image we show. High-resolution tier
+  // (Opus 4.8): 2576 px max edge, 4784 visual tokens.
+  // Reference: docs "Coordinates and bounding boxes → How Claude resizes and pads images".
+  var CLAUDE_MAX_EDGE = 2576, CLAUDE_MAX_TOKENS = 4784;
+  function imageTokenCost(w, h) { return Math.ceil(w / 28) * Math.ceil(h / 28); }
+  function roundTiesToEven(v) {
+    var fl = Math.floor(v);
+    if (v - fl !== 0.5) return Math.round(v);
+    return fl % 2 === 0 ? fl : fl + 1;
+  }
+  function claudeResizedSize(width, height) {
+    function fits(w, h) {
+      return Math.ceil(w / 28) * 28 <= CLAUDE_MAX_EDGE &&
+             Math.ceil(h / 28) * 28 <= CLAUDE_MAX_EDGE &&
+             imageTokenCost(w, h) <= CLAUDE_MAX_TOKENS;
     }
+    if (fits(width, height)) return [width, height];
+    if (height > width) {
+      var r = claudeResizedSize(height, width);
+      return [r[1], r[0]];
+    }
+    var ar = width / height, lo = 1, hi = width;
+    while (lo + 1 < hi) {
+      var mid = Math.floor((lo + hi) / 2);
+      if (fits(mid, Math.max(roundTiesToEven(mid / ar), 1))) lo = mid; else hi = mid;
+    }
+    return [lo, Math.max(roundTiesToEven(lo / ar), 1)];
+  }
+  function imageSizeOf(dataUrl) {
+    return new Promise(function (resolve) {
+      var img = new Image();
+      img.onload = function () { resolve([img.width, img.height]); };
+      img.onerror = function () { resolve(null); };
+      img.src = dataUrl;
+    });
+  }
+  function resizeDataUrlTo(dataUrl, w, h) {
+    return new Promise(function (resolve) {
+      var img = new Image();
+      img.onload = function () {
+        var c = document.createElement("canvas");
+        c.width = w; c.height = h;
+        c.getContext("2d").drawImage(img, 0, 0, w, h);
+        resolve(c.toDataURL("image/jpeg", 0.95));
+      };
+      img.onerror = function () { resolve(null); };
+      img.src = dataUrl;
+    });
+  }
+
+  // Crop a fraction of an image and scale the result to a target pixel size.
+  function cropAndResize(dataUrl, crop, outW, outH) {
+    return new Promise(function (resolve) {
+      var img = new Image();
+      img.onload = function () {
+        var sx = Math.round(img.width * crop.x), sy = Math.round(img.height * crop.y);
+        var sw = Math.round(img.width * crop.w), sh = Math.round(img.height * crop.h);
+        if (sw < 8 || sh < 8) { resolve(null); return; }
+        var c = document.createElement("canvas");
+        c.width = outW; c.height = outH;
+        c.getContext("2d").drawImage(img, sx, sy, sw, sh, 0, 0, outW, outH);
+        resolve(c.toDataURL("image/jpeg", 0.95));
+      };
+      img.onerror = function () { resolve(null); };
+      img.src = dataUrl;
+    });
+  }
+
+  // Prepares one image for the model: optionally crops to a region of interest, then
+  // resizes to exactly the size Claude will see. Keeps the crop rectangle so pixel
+  // coordinates coming back can be mapped onto the original full image.
+  async function buildImageBlocks(labelPrefix, asset, crop) {
+    var empty = { blocks: [], width: 0, height: 0, crop: { x: 0, y: 0, w: 1, h: 1 } };
+    if (!asset || !asset.dataUrl) return empty;
+    var size = await imageSizeOf(asset.dataUrl);
+    if (!size) return empty;
+    crop = crop || { x: 0, y: 0, w: 1, h: 1 };
+    var srcW = Math.round(size[0] * crop.w), srcH = Math.round(size[1] * crop.h);
+    var target = claudeResizedSize(srcW, srcH);
+    var isFull = crop.x === 0 && crop.y === 0 && crop.w === 1 && crop.h === 1;
+    var url;
+    if (isFull && target[0] === size[0] && target[1] === size[1]) url = asset.dataUrl;
+    else url = await cropAndResize(asset.dataUrl, crop, target[0], target[1]);
+    var parsed = parseDataUrl(url || asset.dataUrl);
+    if (!parsed) return empty;
+    return {
+      blocks: [
+        { type: "text", text: labelPrefix + " — розмір рівно " + target[0] + "×" + target[1] + " пікселів. Координати для цього зображення давай у ПІКСЕЛЯХ у цьому діапазоні:" },
+        { type: "image", source: { type: "base64", media_type: parsed.mediaType, data: parsed.base64 } }
+      ],
+      width: target[0], height: target[1], crop: crop
+    };
+  }
+
+  // Pixel coords on the (possibly cropped) image the model saw → fractions of the
+  // original full image, which is what the UI overlays are drawn against.
+  function bboxFromPixels(b, prep) {
+    if (!b || !prep || !prep.width || !prep.height) return null;
+    var c = prep.crop || { x: 0, y: 0, w: 1, h: 1 };
+    var x1 = Math.max(0, Math.min(prep.width, b.x1)), x2 = Math.max(0, Math.min(prep.width, b.x2));
+    var y1 = Math.max(0, Math.min(prep.height, b.y1)), y2 = Math.max(0, Math.min(prep.height, b.y2));
+    var fx = Math.min(x1, x2) / prep.width, fy = Math.min(y1, y2) / prep.height;
+    var fw = Math.abs(x2 - x1) / prep.width, fh = Math.abs(y2 - y1) / prep.height;
+    if (fw <= 0.001 || fh <= 0.001) return null;
+    return { x: c.x + fx * c.w, y: c.y + fy * c.h, w: fw * c.w, h: fh * c.h };
+  }
+
+  // A drawing sheet is mostly title block, borders and blank paper; the elevation
+  // itself may be a fraction of it. Cropping to the elevation before the comparison
+  // spends the whole resolution budget on the building, which is what makes small
+  // features (garage door lites, muntins, light fixtures) resolvable at all.
+  async function locateElevationOnSheet(asset, settings, style) {
+    var prep = await buildImageBlocks("АРКУШ КРЕСЛЕННЯ", asset);
+    if (!prep.width) return null;
+    var schema = {
+      type: "object",
+      properties: {
+        found: { type: "boolean" },
+        x1: { type: "number" }, y1: { type: "number" },
+        x2: { type: "number" }, y2: { type: "number" }
+      },
+      required: ["found", "x1", "y1", "x2", "y2"],
+      additionalProperties: false
+    };
     var body = {
       model: settings.model || DEFAULT_MODEL,
-      max_tokens: 4096,
-      output_config: { effort: "high", format: { type: "json_schema", schema: buildDiscrepancySchema() } },
-      system: SYSTEM_PROMPT,
-      messages: [{
-        role: "user",
-        content: [
-          { type: "text", text: "КРЕСЛЕННЯ (фасад):" },
-          { type: "image", source: { type: "base64", media_type: drawing.mediaType, data: drawing.base64 } },
-          { type: "text", text: "РЕНДЕР:" },
-          { type: "image", source: { type: "base64", media_type: render.mediaType, data: render.base64 } },
-          { type: "text", text: "Порівняй елементи фасаду за інструкціями в системному промпті і поверни JSON зі списком невідповідностей." }
-        ]
-      }]
+      max_tokens: 1200,
+      output_config: { effort: "low", format: { type: "json_schema", schema: schema } },
+      system: "Ти визначаєш, де саме на аркуші креслення розташований сам малюнок фасаду (елевація) — " +
+              "тобто зображення будинку. Поверни його прямокутник у ПІКСЕЛЯХ (x1,y1 — лівий верхній кут, " +
+              "x2,y2 — правий нижній). НЕ включай у прямокутник: штамп/титульний блок з назвою проєкту й " +
+              "логотипами, рамку аркуша, таблиці, списки приміток, порожні поля. Включи будинок повністю " +
+              "разом із дахом, ґанком і лінією землі, а також підписи-виноски, що стосуються фасаду. " +
+              (style
+                ? "На аркуші кілька фасадів різних стилів, підписаних під малюнками (напр. «FRONT ELEVATION " +
+                  style.name + "»). Потрібен САМЕ фасад стилю «" + style.name + "» — читай підписи під " +
+                  "малюнками й бери той, що збігається дослівно. Увага: «FARMHOUSE» і «MODERN FARMHOUSE» — " +
+                  "це РІЗНІ стилі, не плутай їх. Якщо фасаду з таким підписом на аркуші немає — found=false."
+                : "Якщо на аркуші кілька фасадів — візьми найбільший (головний). Якщо малюнка фасаду немає — " +
+                  "found=false."),
+      messages: [{ role: "user", content: prep.blocks.concat([
+        { type: "text", text: "Де на цьому аркуші (" + prep.width + "×" + prep.height + " px) " +
+          (style ? "малюнок фасаду стилю «" + style.name + "»?" : "сам малюнок фасаду?") }
+      ]) }]
     };
+    try {
+      var json = await callAnthropicMessages(body, settings);
+      var tb = (json.content || []).find(function (b) { return b.type === "text"; });
+      if (!tb) return null;
+      var r = JSON.parse(tb.text);
+      if (!r.found) return null;
+      var x1 = Math.max(0, Math.min(prep.width, Math.min(r.x1, r.x2)));
+      var x2 = Math.max(0, Math.min(prep.width, Math.max(r.x1, r.x2)));
+      var y1 = Math.max(0, Math.min(prep.height, Math.min(r.y1, r.y2)));
+      var y2 = Math.max(0, Math.min(prep.height, Math.max(r.y1, r.y2)));
+      var pad = 0.03;
+      var cx = x1 / prep.width, cy = y1 / prep.height;
+      var cw = (x2 - x1) / prep.width, ch = (y2 - y1) / prep.height;
+      cx = Math.max(0, cx - pad); cy = Math.max(0, cy - pad);
+      cw = Math.min(1 - cx, cw + 2 * pad); ch = Math.min(1 - cy, ch + 2 * pad);
+      if (cw < 0.15 || ch < 0.1) return null;          // implausibly small — ignore
+      if (cw * ch > 0.75) return null;                  // barely a crop — not worth it
+      return { x: cx, y: cy, w: cw, h: ch };
+    } catch (e) { return null; }
+  }
+
+  // Deterministic guard against invented coordinates: if the reported region on the
+  // drawing is a uniform blank patch, the model pointed at nothing.
+  function regionIsBlank(dataUrl, bbox) {
+    return new Promise(function (resolve) {
+      if (!bbox) { resolve(false); return; }
+      var img = new Image();
+      img.onload = function () {
+        var sx = Math.round(img.width * bbox.x), sy = Math.round(img.height * bbox.y);
+        var sw = Math.round(img.width * bbox.w), sh = Math.round(img.height * bbox.h);
+        if (sw < 2 || sh < 2) { resolve(false); return; }
+        var N = 48;
+        var c = document.createElement("canvas");
+        c.width = N; c.height = N;
+        var ctx = c.getContext("2d");
+        try { ctx.drawImage(img, sx, sy, sw, sh, 0, 0, N, N); } catch (e) { resolve(false); return; }
+        var d;
+        try { d = ctx.getImageData(0, 0, N, N).data; } catch (e) { resolve(false); return; }
+        var sum = 0, sumSq = 0, n = N * N;
+        for (var i = 0; i < d.length; i += 4) {
+          var lum = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+          sum += lum; sumSq += lum * lum;
+        }
+        var mean = sum / n;
+        var sd = Math.sqrt(Math.max(0, sumSq / n - mean * mean));
+        resolve(sd < 6 && mean > 230);
+      };
+      img.onerror = function () { resolve(false); };
+      img.src = dataUrl;
+    });
+  }
+
+  async function callAnthropicMessages(body, settings) {
     var res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
@@ -300,20 +683,108 @@
     if (json.stop_reason === "refusal") {
       throw new Error("Модель відмовилась обробити запит" + (json.stop_details && json.stop_details.explanation ? ": " + json.stop_details.explanation : "."));
     }
+    return json;
+  }
+
+  async function callClaudeVision(drawingAsset, renderAsset, settings, onProgress) {
+    if (!parseDataUrl(drawingAsset && drawingAsset.dataUrl) || !parseDataUrl(renderAsset && renderAsset.dataUrl)) {
+      throw new Error("Реальний AI підтримує лише завантажені JPG/PNG зображення (не демо-SVG).");
+    }
+    // Zoom the drawing onto the elevation itself so small features stay resolvable.
+    // Style code from the render filename (CL, CO, MH…) says which elevation to take
+    // when the sheet carries several. A hand-drawn selection wins over both.
+    var style = elevationStyleFromRenderName(renderAsset.name);
+    var elevationCrop = null;
+    if (drawingAsset.userCropped) {
+      if (onProgress) onProgress("🤖 Аналізую (ваша виділена ділянка)…");
+    } else {
+      if (onProgress) onProgress(style ? "🔍 Шукаю фасад «" + style.name + "» на аркуші…" : "🔍 Шукаю фасад на аркуші…");
+      elevationCrop = await locateElevationOnSheet(drawingAsset, settings, style);
+      if (onProgress) onProgress(elevationCrop ? "🤖 Аналізую (фасад збільшено)…" : "🤖 Аналізую…");
+    }
+
+    var drawingImg = await buildImageBlocks("КРЕСЛЕННЯ", drawingAsset, elevationCrop);
+    var renderImg = await buildImageBlocks("РЕНДЕР", renderAsset);
+    var drawingBlocks = drawingImg.blocks, renderBlocks = renderImg.blocks;
+    if (elevationCrop || drawingAsset.userCropped) {
+      drawingBlocks = drawingBlocks.concat([{ type: "text", text:
+        "(Це збільшений фрагмент аркуша — сам малюнок фасаду. Штамп, рамка й порожні поля обрізані навмисно, " +
+        "їх відсутність не є помилкою. Координати давай у пікселях ЦЬОГО зображення.)" }]);
+    }
+    if (style) {
+      drawingBlocks = drawingBlocks.concat([{ type: "text", text:
+        "(Ім'я файлу рендера містить код стилю «" + style.code + "» — на кресленні це фасад «" + style.name +
+        "». Якщо на цьому фрагменті видно підпис іншого стилю — так і зазнач в uncertain_areas, бо тоді " +
+        "порівнюються різні будинки. «FARMHOUSE» і «MODERN FARMHOUSE» — різні стилі.)" }]);
+    }
+    var textLayerBlocks = [];
+    if (drawingAsset.pdfText && drawingAsset.pdfText.length > 20) {
+      textLayerBlocks.push({
+        type: "text",
+        text: "ТЕКСТОВИЙ ШАР КРЕСЛЕННЯ (витягнутий напряму з PDF, НЕ розпізнаний із картинки — це " +
+              "достовірні підписи, специфікації й позначення саме цієї сторінки). Використовуй його як " +
+              "надійніше джерело за візуальне розпізнавання, коли йдеться про матеріали, типи елементів, " +
+              "розміри отворів і назви вузлів. Якщо підпис прямо називає матеріал чи тип — довіряй підпису, " +
+              "а не своєму враженню від штрихування. Порядок слів може бути змішаний, бо це сирий текстовий " +
+              "шар:\n\n" + drawingAsset.pdfText.slice(0, 6000)
+      });
+    }
+    var content = drawingBlocks.concat(textLayerBlocks).concat(renderBlocks).concat([
+      { type: "text", text:
+        "Вище — креслення і рендер одного й того ж фасаду. Аркуш креслення може містити рамку, штамп і порожні поля — це не частина будинку.\n\n" +
+        "КООРДИНАТИ. Усі bounding box давай у ПІКСЕЛЯХ як x1, y1 (лівий верхній кут) і x2, y2 (правий нижній кут), початок координат — лівий верхній кут зображення.\n" +
+        "· drawing_bbox — у пікселях КРЕСЛЕННЯ, розмір " + drawingImg.width + "×" + drawingImg.height + " (x від 0 до " + drawingImg.width + ", y від 0 до " + drawingImg.height + ").\n" +
+        "· render_bbox — у пікселях РЕНДЕРА, розмір " + renderImg.width + "×" + renderImg.height + " (x від 0 до " + renderImg.width + ", y від 0 до " + renderImg.height + ").\n" +
+        "Не використовуй частки від 0 до 1 — тільки цілі піксельні значення в цих діапазонах. Рамка має щільно охоплювати сам елемент, а не порожнє місце аркуша.\n\n" +
+        "Порівняй елементи фасаду за інструкціями в системному промпті і поверни JSON." }
+    ]);
+    var body = {
+      model: settings.model || DEFAULT_MODEL,
+      max_tokens: 8000,
+      thinking: { type: "adaptive" },
+      output_config: { effort: "high", format: { type: "json_schema", schema: buildDiscrepancySchema() } },
+      system: SYSTEM_PROMPT,
+      messages: [{ role: "user", content: content }]
+    };
+    var json = await callAnthropicMessages(body, settings);
     var textBlock = (json.content || []).find(function (b) { return b.type === "text"; });
     if (!textBlock) throw new Error("Порожня відповідь від AI.");
     var parsed = JSON.parse(textBlock.text);
-    return (parsed.discrepancies || []).map(function (d) {
-      return {
-        element_name: d.element_name,
-        element_type: d.element_type,
-        error_type: d.error_type,
-        description: d.description,
-        confidence: Math.max(0, Math.min(1, d.confidence)),
-        drawing_bbox: d.drawing_bbox,
-        render_bbox: d.render_bbox
-      };
-    });
+    var summary = parsed.comparison_summary || {};
+    return {
+      summary: {
+        mirror_detected: !!summary.mirror_detected,
+        overall_result: summary.overall_result || "",
+        checked_categories: summary.checked_categories || []
+      },
+      differences: (parsed.differences || []).map(function (d) {
+        return {
+          element_name: d.element_name,
+          element_type: d.element_type,
+          category: d.category,
+          error_type: d.error_type,
+          description: d.description_uk,
+          drawing_evidence: d.drawing_evidence,
+          render_evidence: d.render_evidence,
+          difference_note: d.difference,
+          confidence: Math.max(0, Math.min(1, d.confidence)),
+          drawing_bbox: bboxFromPixels(d.drawing_bbox, drawingImg),
+          render_bbox: bboxFromPixels(d.render_bbox, renderImg)
+        };
+      }),
+      uncertain_areas: (parsed.uncertain_areas || []).map(function (u) {
+        return {
+          element_name: u.element_name,
+          category: u.category,
+          reason: u.reason,
+          drawing_observation: u.drawing_observation,
+          render_observation: u.render_observation,
+          confidence: Math.max(0, Math.min(1, u.confidence)),
+          drawing_bbox: bboxFromPixels(u.drawing_bbox, drawingImg),
+          render_bbox: bboxFromPixels(u.render_bbox, renderImg)
+        };
+      })
+    };
   }
 
   function openSettingsModal() {
@@ -360,9 +831,46 @@
     };
   }
 
+  // ---------- image blob storage (IndexedDB — localStorage quota is too small for images) ----------
+  var IDB_NAME = "renderqc_db_v1";
+  var IDB_STORE = "asset_blobs";
+  var idbPromise = null;
+  function openIdb() {
+    if (idbPromise) return idbPromise;
+    idbPromise = new Promise(function (resolve, reject) {
+      if (!window.indexedDB) { reject(new Error("IndexedDB недоступний")); return; }
+      var req = indexedDB.open(IDB_NAME, 1);
+      req.onupgradeneeded = function () { req.result.createObjectStore(IDB_STORE, { keyPath: "id" }); };
+      req.onsuccess = function () { resolve(req.result); };
+      req.onerror = function () { reject(req.error); };
+    });
+    return idbPromise;
+  }
+  function idbPutBlob(id, dataUrl, pdfText) {
+    return openIdb().then(function (db) {
+      return new Promise(function (resolve, reject) {
+        var tx = db.transaction(IDB_STORE, "readwrite");
+        tx.objectStore(IDB_STORE).put({ id: id, dataUrl: dataUrl, pdfText: pdfText || "" });
+        tx.oncomplete = function () { resolve(); };
+        tx.onerror = function () { reject(tx.error); };
+      });
+    });
+  }
+  function idbGetAllBlobs() {
+    return openIdb().then(function (db) {
+      return new Promise(function (resolve, reject) {
+        var tx = db.transaction(IDB_STORE, "readonly");
+        var req = tx.objectStore(IDB_STORE).getAll();
+        req.onsuccess = function () { resolve(req.result || []); };
+        req.onerror = function () { reject(req.error); };
+      });
+    });
+  }
+
   // ---------- state ----------
   var STORAGE_KEY = "renderqc_state_v1";
   var state = loadState();
+  hydrateAssetBlobs();
 
   function freshState() {
     return { projects: [], assets: [], runs: [], discrepancies: [], seq: { project:0, asset:0, run:0, discrepancy:0 } };
@@ -373,16 +881,45 @@
       if (!raw) return freshState();
       var parsed = JSON.parse(raw);
       if (!parsed.seq) return freshState();
+      parsed.assets = parsed.assets || [];
+      // Migrate anything still embedded from before IndexedDB storage existed.
+      parsed.assets.forEach(function (a) {
+        if (a.dataUrl || a.pdfText) idbPutBlob(a.id, a.dataUrl, a.pdfText).catch(function () {});
+      });
       return parsed;
     } catch (e) { return freshState(); }
   }
+  function hydrateAssetBlobs() {
+    idbGetAllBlobs().then(function (rows) {
+      var byId = {};
+      rows.forEach(function (r) { byId[r.id] = r; });
+      var changed = false;
+      state.assets.forEach(function (a) {
+        var rec = byId[a.id];
+        if (!rec) return;
+        if (!a.dataUrl && rec.dataUrl) { a.dataUrl = rec.dataUrl; changed = true; }
+        if (!a.pdfText && rec.pdfText) { a.pdfText = rec.pdfText; }
+      });
+      if (changed) render();
+    }).catch(function () {});
+  }
+  // Only lightweight records go to localStorage — images and the PDF text layer
+  // live in IndexedDB, so run history can never be lost to a quota overflow.
   function saveState() {
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
-    catch (e) { toast("Локальне сховище переповнене — зображення завеликі. Спробуйте менші файли."); }
+    var slimAssets = state.assets.map(function (a) {
+      return { id: a.id, project_id: a.project_id, kind: a.kind, name: a.name };
+    });
+    var slim = { projects: state.projects, assets: slimAssets, runs: state.runs, discrepancies: state.discrepancies, seq: state.seq };
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(slim));
+      return true;
+    } catch (e) {
+      toast("⚠️ Історію перевірок не вдалося зберегти (сховище переповнене). Видаліть старі перевірки або очистіть дані сайту.");
+      return false;
+    }
   }
   function nextId(kind) { state.seq[kind] += 1; return state.seq[kind]; }
 
-  function findProject(id) { return state.projects.find(function (p) { return p.id === id; }); }
   function findAsset(id) { return state.assets.find(function (a) { return a.id === id; }); }
   function findRun(id) { return state.runs.find(function (r) { return r.id === id; }); }
   function assetsOf(projectId, kind) {
@@ -436,15 +973,16 @@
     );
   }
 
-  function seedDemoProject() {
-    var pid = nextId("project");
-    state.projects.unshift({ id: pid, name: "Демо-проєкт · 29 East 64th St", created_at: new Date().toISOString() });
+  function seedDemoData(pid) {
     var drawId = nextId("asset");
-    state.assets.unshift({ id: drawId, project_id: pid, kind: "drawing", name: "elevation-north.svg", dataUrl: houseSvg("drawing") });
+    var drawUrl = houseSvg("drawing");
+    state.assets.unshift({ id: drawId, project_id: pid, kind: "drawing", name: "elevation-north.svg", dataUrl: drawUrl });
+    idbPutBlob(drawId, drawUrl).catch(function () {});
     var renderId = nextId("asset");
-    state.assets.unshift({ id: renderId, project_id: pid, kind: "render", name: "render-01.svg", dataUrl: houseSvg("render") });
+    var renderUrl = houseSvg("render");
+    state.assets.unshift({ id: renderId, project_id: pid, kind: "render", name: "render-01.svg", dataUrl: renderUrl });
+    idbPutBlob(renderId, renderUrl).catch(function () {});
     saveState();
-    return pid;
   }
 
   // ---------- routing ----------
@@ -457,6 +995,9 @@
   window.addEventListener("DOMContentLoaded", render);
   window.addEventListener("DOMContentLoaded", function () {
     updateAiBadge();
+    requestPersistentStorage();
+    var ver = document.getElementById("app-version");
+    if (ver) ver.textContent = APP_VERSION;
     document.getElementById("settings-btn").onclick = openSettingsModal;
   });
 
@@ -485,7 +1026,7 @@
         var canvas = document.createElement("canvas");
         canvas.width = w; canvas.height = h;
         canvas.getContext("2d").drawImage(img, 0, 0, w, h);
-        cb(canvas.toDataURL("image/jpeg", 0.85));
+        cb(canvas.toDataURL("image/jpeg", 0.93));
       };
       img.onerror = function () { cb(e.target.result); };
       img.src = e.target.result;
@@ -493,168 +1034,862 @@
     reader.readAsDataURL(file);
   }
 
+  // ---------- PDF elevation picker (client-side, via pdf.js) ----------
+  function isPdfFile(file) {
+    return file && (file.type === "application/pdf" || /\.pdf$/i.test(file.name || ""));
+  }
+  function isDwgFile(file) {
+    return file && /\.dwg$/i.test(file.name || "");
+  }
+
+  async function renderPdfPageToCanvas(pdfDoc, pageNum, maxWidth) {
+    var page = await pdfDoc.getPage(pageNum);
+    var base = page.getViewport({ scale: 1 });
+    // Cap by canvas area, not a fixed scale, so deep zoom stays sharp without
+    // asking the browser for a bitmap it will refuse to allocate.
+    var scale = maxWidth / base.width;
+    var MAX_PIXELS = 40e6;
+    if (base.width * scale * base.height * scale > MAX_PIXELS) {
+      scale = Math.sqrt(MAX_PIXELS / (base.width * base.height));
+    }
+    var viewport = page.getViewport({ scale: scale });
+    var canvas = document.createElement("canvas");
+    canvas.width = Math.round(viewport.width);
+    canvas.height = Math.round(viewport.height);
+    await page.render({ canvasContext: canvas.getContext("2d"), viewport: viewport }).promise;
+    return canvas;
+  }
+
+  // Render files are named like "MDH_ShelteredHarbor_Rend_Tydings_II_RL.jpg" —
+  // the plan name is the token(s) right after "Rend". Used to auto-locate the
+  // matching elevation inside a multi-hundred-page drawing set.
+  function planNameFromRenderName(name) {
+    if (!name) return null;
+    var base = name.replace(/\.[a-z0-9]+$/i, "");
+    var parts = base.split(/[_\-\s]+/).filter(Boolean);
+    var idx = -1;
+    for (var i = 0; i < parts.length; i++) {
+      if (/^rend(er|ering)?$/i.test(parts[i])) { idx = i; break; }
+    }
+    if (idx < 0 || idx + 1 >= parts.length) return null;
+    var candidates = [];
+    // Longest first so "Tydings II" beats "Tydings" when the drawing spells it out.
+    if (idx + 2 < parts.length) candidates.push(parts[idx + 1] + " " + parts[idx + 2]);
+    candidates.push(parts[idx + 1]);
+    return candidates.filter(function (c) { return c.length >= 3; });
+  }
+
+  function normalizeForMatch(s) {
+    return (s || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  }
+
+  // Render filenames carry a two-letter elevation-style code (…_Rend_Tydings_CL.jpg).
+  // The drawing sheet spells the style out in the elevation title, so the code tells
+  // us which of several elevations on one sheet the render actually belongs to.
+  var ELEVATION_STYLE_CODE = {
+    SI: "SIGNATURE",
+    CO: "COTTAGE",
+    CL: "CLASSIC",
+    CR: "CRAFTSMAN",
+    FH: "FARMHOUSE",
+    MH: "MODERN FARMHOUSE"
+  };
+  function elevationStyleFromRenderName(name) {
+    if (!name) return null;
+    var parts = name.replace(/\.[a-z0-9]+$/i, "").split(/[_\-\s.]+/).filter(Boolean);
+    // Scan from the end: the style code sits in the tail of the name, and an early
+    // token (community or builder abbreviation) could collide by accident.
+    for (var i = parts.length - 1; i >= 0; i--) {
+      var t = parts[i].toUpperCase();
+      if (ELEVATION_STYLE_CODE[t]) return { code: t, name: ELEVATION_STYLE_CODE[t] };
+    }
+    return null;
+  }
+  // "FARMHOUSE" is a substring of "MODERN FARMHOUSE", so FH must not match an MH sheet.
+  function textHasStyle(text, styleName) {
+    var hay = normalizeForMatch(text), needle = normalizeForMatch(styleName);
+    if (!hay || !needle) return false;
+    var from = 0;
+    while (true) {
+      var i = hay.indexOf(needle, from);
+      if (i === -1) return false;
+      if (!(needle === "FARMHOUSE" && i >= 6 && hay.slice(i - 6, i) === "MODERN")) return true;
+      from = i + 1;
+    }
+  }
+
+  function openPdfPagePicker(file, onConfirm, planCandidates, style) {
+    var root = document.getElementById("global-modal-root");
+    root.innerHTML =
+      '<div class="modal-backdrop" id="pdf-backdrop">' +
+        '<div class="modal" style="max-width:900px;">' +
+          '<h3 style="margin:0 0 2px;">📄 Оберіть сторінку з елевацією</h3>' +
+          '<p class="muted" id="pdf-status" style="margin:0 0 8px;">Завантаження PDF…</p>' +
+          '<div class="row" style="gap:6px; margin-bottom:8px;">' +
+            '<input type="text" id="pdf-search" placeholder="Пошук по тексту креслення, напр. FAIRFIELD" style="flex:1;">' +
+            '<button class="btn btn-sm" id="pdf-search-btn">Знайти</button>' +
+          '</div>' +
+          '<div id="pdf-match-info" class="faint" style="font-size:11px; margin-bottom:6px;"></div>' +
+          '<div class="row" style="gap:6px; margin-bottom:6px; align-items:center;">' +
+            '<button class="btn btn-sm" id="pdf-zoom-out">🔍−</button>' +
+            '<span class="faint" id="pdf-zoom-label" style="font-size:12px; min-width:46px; text-align:center;">100%</span>' +
+            '<button class="btn btn-sm" id="pdf-zoom-in">🔍+</button>' +
+            '<button class="btn btn-sm" id="pdf-zoom-fit">У вікно</button>' +
+            '<button class="btn btn-sm" id="pdf-select-btn">✂️ Виділити фасад</button>' +
+            '<span class="faint" id="pdf-select-hint" style="font-size:11px;">— на аркуші кілька фасадів? виділіть потрібний рамкою</span>' +
+          '</div>' +
+          '<div id="pdf-canvas-wrap" style="border:1px solid var(--border); border-radius:8px; overflow:auto; max-height:60vh; background:#f1f5f9; text-align:center; cursor:grab;"></div>' +
+          '<div class="row" style="justify-content:space-between; margin-top:10px;">' +
+            '<div class="row" style="gap:6px;">' +
+              '<button class="btn btn-sm" id="pdf-prev">&larr; Попередня</button>' +
+              '<span class="faint" id="pdf-page-label" style="font-size:12px;"></span>' +
+              '<button class="btn btn-sm" id="pdf-next">Наступна &rarr;</button>' +
+            '</div>' +
+            '<div class="row">' +
+              '<button class="btn" id="pdf-cancel">Скасувати</button>' +
+              '<button class="btn btn-primary" id="pdf-use" disabled>Використати цю сторінку</button>' +
+            '</div>' +
+          '</div>' +
+        '</div>' +
+      '</div>';
+    document.getElementById("pdf-cancel").onclick = function () { root.innerHTML = ""; };
+    document.getElementById("pdf-backdrop").onclick = function (e) { if (e.target.id === "pdf-backdrop") root.innerHTML = ""; };
+
+    var pdfDoc = null, currentPage = 1, pageTexts = [], textReady = false;
+    var statusEl = document.getElementById("pdf-status");
+    var matchEl = document.getElementById("pdf-match-info");
+
+    file.arrayBuffer().then(function (buf) {
+      return pdfjsLib.getDocument({ data: buf }).promise;
+    }).then(function (doc) {
+      pdfDoc = doc;
+      statusEl.textContent = file.name + " · " + doc.numPages + " стор.";
+      document.getElementById("pdf-use").disabled = false;
+      showPage(1);
+      return extractAllText(doc);
+    }).catch(function (err) {
+      statusEl.textContent = "Не вдалося прочитати PDF: " + err.message;
+    });
+
+    async function extractAllText(doc) {
+      matchEl.textContent = "Читаю текстовий шар…";
+      for (var p = 1; p <= doc.numPages; p++) {
+        try {
+          var pg = await doc.getPage(p);
+          var tc = await pg.getTextContent();
+          pageTexts[p] = tc.items.map(function (i) { return i.str; }).join(" ").replace(/\s+/g, " ").trim();
+        } catch (e) { pageTexts[p] = ""; }
+        if (p % 10 === 0) matchEl.textContent = "Читаю текстовий шар… " + p + "/" + doc.numPages;
+      }
+      textReady = true;
+      var withText = pageTexts.filter(function (t) { return t && t.length > 20; }).length;
+      if (withText === 0) {
+        matchEl.textContent = "⚠️ У цьому PDF немає текстового шару (креслення растрове або текст переведено в криві) — автопошук сторінки недоступний, гортайте вручну.";
+        return;
+      }
+      var auto = planCandidates && planCandidates.length ? findPages(planCandidates) : null;
+      if (auto && auto.pages.length) {
+        var note = "";
+        if (style) {
+          var styled = auto.pages.filter(function (p) { return textHasStyle(pageTexts[p], style.name); });
+          if (styled.length) {
+            auto.pages = styled;
+            note = ' + стиль <b>' + esc(style.code) + ' → ' + esc(style.name) + '</b>';
+          } else {
+            note = ' <span style="color:#b45309;">(стиль ' + esc(style.code) + ' → ' + esc(style.name) +
+                   ' на цих сторінках не згадується)</span>';
+          }
+        }
+        matchEl.innerHTML = '✅ Збіг із планом <b>' + esc(auto.term) + '</b> (з імені рендера)' + note + ' — стор.: ' +
+          auto.pages.slice(0, 12).join(", ") + (auto.pages.length > 12 ? " …" : "");
+        showPage(auto.pages[0]);
+      } else if (style && findPages([style.name])) {
+        var byStyle = findPages([style.name]);
+        matchEl.innerHTML = 'ℹ️ План з імені рендера не знайдено, але стиль <b>' + esc(style.code) + ' → ' +
+          esc(style.name) + '</b> є на стор.: ' + byStyle.pages.slice(0, 12).join(", ") +
+          (byStyle.pages.length > 12 ? " …" : "");
+        showPage(byStyle.pages[0]);
+      } else if (planCandidates && planCandidates.length) {
+        matchEl.textContent = "Текстовий шар прочитано (" + withText + " стор. з текстом), але план «" + planCandidates[planCandidates.length - 1] + "» у ньому не знайдено — гортайте вручну або скористайтесь пошуком.";
+      } else {
+        matchEl.textContent = "Текстовий шар прочитано: " + withText + " стор. з текстом. Скористайтесь пошуком, щоб знайти потрібну елевацію.";
+      }
+    }
+
+    function findPages(terms) {
+      for (var t = 0; t < terms.length; t++) {
+        var needle = normalizeForMatch(terms[t]);
+        if (needle.length < 3) continue;
+        var found = [];
+        for (var p = 1; p < pageTexts.length; p++) {
+          if (pageTexts[p] && textHasStyle(pageTexts[p], terms[t])) found.push(p);
+        }
+        if (found.length) return { term: terms[t], pages: found };
+      }
+      return null;
+    }
+
+    var zoom = 1;
+    var ZOOM_STEPS = [1, 1.5, 2, 3, 4, 6, 8];
+    var BASE_WIDTH = 860;
+
+    function setZoom(z, keepScroll) {
+      zoom = Math.max(ZOOM_STEPS[0], Math.min(ZOOM_STEPS[ZOOM_STEPS.length - 1], z));
+      document.getElementById("pdf-zoom-label").textContent = Math.round(zoom * 100) + "%";
+      showPage(currentPage, keepScroll);
+    }
+
+    // Selection rectangle in page fractions; when set, only this region is used.
+    var selection = null, selectMode = false;
+
+    function paintSelection() {
+      var box = document.getElementById("pdf-sel-box");
+      var canvas = document.querySelector("#pdf-canvas-wrap canvas");
+      if (!box || !canvas) return;
+      if (!selection) { box.style.display = "none"; return; }
+      box.style.display = "block";
+      box.style.left = (canvas.offsetLeft + selection.x * canvas.clientWidth) + "px";
+      box.style.top = (canvas.offsetTop + selection.y * canvas.clientHeight) + "px";
+      box.style.width = (selection.w * canvas.clientWidth) + "px";
+      box.style.height = (selection.h * canvas.clientHeight) + "px";
+    }
+
+    function updateSelectUi() {
+      var useBtn = document.getElementById("pdf-use");
+      var hint = document.getElementById("pdf-select-hint");
+      var btn = document.getElementById("pdf-select-btn");
+      var wrap = document.getElementById("pdf-canvas-wrap");
+      btn.textContent = selectMode ? "✂️ Скасувати виділення" : (selection ? "✂️ Виділити заново" : "✂️ Виділити фасад");
+      wrap.style.cursor = selectMode ? "crosshair" : "grab";
+      if (selectMode) hint.textContent = "— обведіть потрібний фасад мишею";
+      else if (selection) hint.textContent = "✅ фасад виділено — буде взято тільки цю ділянку";
+      else hint.textContent = "— на аркуші кілька фасадів? виділіть потрібний рамкою";
+      useBtn.textContent = selection ? "Використати виділене" : "Використати цю сторінку";
+    }
+
+    function showPage(n, keepScroll) {
+      if (!pdfDoc) return;
+      var changedPage = n !== currentPage;
+      currentPage = Math.max(1, Math.min(pdfDoc.numPages, n));
+      if (changedPage) { selection = null; selectMode = false; }
+      document.getElementById("pdf-page-label").textContent = "Сторінка " + currentPage + " / " + pdfDoc.numPages;
+      var wrap = document.getElementById("pdf-canvas-wrap");
+      // Keep the same point of the page centred while zooming.
+      var relX = 0.5, relY = 0.5;
+      if (keepScroll && wrap.scrollWidth > 0) {
+        relX = (wrap.scrollLeft + wrap.clientWidth / 2) / wrap.scrollWidth;
+        relY = (wrap.scrollTop + wrap.clientHeight / 2) / wrap.scrollHeight;
+      }
+      renderPdfPageToCanvas(pdfDoc, currentPage, Math.round(BASE_WIDTH * zoom)).then(function (canvas) {
+        canvas.style.display = "block";
+        canvas.style.margin = "0 auto";
+        if (zoom === 1) canvas.style.maxWidth = "100%";
+        wrap.innerHTML = "";
+        var holder = document.createElement("div");
+        holder.style.position = "relative";
+        holder.style.display = "inline-block";
+        holder.appendChild(canvas);
+        var box = document.createElement("div");
+        box.id = "pdf-sel-box";
+        box.style.cssText = "position:absolute; display:none; border:2px solid #2f57c9; background:rgba(47,87,201,.15); pointer-events:none;";
+        holder.appendChild(box);
+        wrap.appendChild(holder);
+        if (keepScroll) {
+          wrap.scrollLeft = relX * wrap.scrollWidth - wrap.clientWidth / 2;
+          wrap.scrollTop = relY * wrap.scrollHeight - wrap.clientHeight / 2;
+        }
+        paintSelection();
+        updateSelectUi();
+      });
+    }
+
+    document.getElementById("pdf-select-btn").onclick = function () {
+      selectMode = !selectMode;
+      if (selectMode) selection = null;
+      paintSelection();
+      updateSelectUi();
+    };
+
+    function stepZoom(dir) {
+      var i = 0;
+      for (var k = 0; k < ZOOM_STEPS.length; k++) if (ZOOM_STEPS[k] <= zoom + 0.001) i = k;
+      setZoom(ZOOM_STEPS[Math.max(0, Math.min(ZOOM_STEPS.length - 1, i + dir))], true);
+    }
+    document.getElementById("pdf-zoom-in").onclick = function () { stepZoom(1); };
+    document.getElementById("pdf-zoom-out").onclick = function () { stepZoom(-1); };
+    document.getElementById("pdf-zoom-fit").onclick = function () { setZoom(1, false); };
+
+    (function enablePanAndWheelZoom() {
+      var wrap = document.getElementById("pdf-canvas-wrap");
+      var dragging = false, sx = 0, sy = 0, sl = 0, st = 0;
+      var selecting = false, ax = 0, ay = 0;
+
+      function canvasPoint(e) {
+        var canvas = wrap.querySelector("canvas");
+        if (!canvas) return null;
+        var r = canvas.getBoundingClientRect();
+        return {
+          x: Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)),
+          y: Math.max(0, Math.min(1, (e.clientY - r.top) / r.height))
+        };
+      }
+
+      wrap.addEventListener("mousedown", function (e) {
+        if (selectMode) {
+          var p = canvasPoint(e);
+          if (!p) return;
+          selecting = true; ax = p.x; ay = p.y;
+          selection = { x: ax, y: ay, w: 0, h: 0 };
+          paintSelection(); e.preventDefault();
+          return;
+        }
+        dragging = true; sx = e.clientX; sy = e.clientY;
+        sl = wrap.scrollLeft; st = wrap.scrollTop;
+        wrap.style.cursor = "grabbing"; e.preventDefault();
+      });
+      window.addEventListener("mousemove", function (e) {
+        if (selecting) {
+          var p = canvasPoint(e);
+          if (!p) return;
+          selection = {
+            x: Math.min(ax, p.x), y: Math.min(ay, p.y),
+            w: Math.abs(p.x - ax), h: Math.abs(p.y - ay)
+          };
+          paintSelection();
+          return;
+        }
+        if (!dragging) return;
+        wrap.scrollLeft = sl - (e.clientX - sx);
+        wrap.scrollTop = st - (e.clientY - sy);
+      });
+      window.addEventListener("mouseup", function () {
+        if (selecting) {
+          selecting = false;
+          if (!selection || selection.w < 0.02 || selection.h < 0.02) selection = null;
+          selectMode = false;
+          paintSelection(); updateSelectUi();
+          return;
+        }
+        dragging = false; wrap.style.cursor = selectMode ? "crosshair" : "grab";
+      });
+      wrap.addEventListener("wheel", function (e) {
+        if (!e.ctrlKey) return;      // plain scroll still scrolls the page
+        e.preventDefault();
+        stepZoom(e.deltaY < 0 ? 1 : -1);
+      }, { passive: false });
+    })();
+
+    function runSearch() {
+      var q = document.getElementById("pdf-search").value.trim();
+      if (!q) return;
+      if (!textReady) { matchEl.textContent = "Текстовий шар ще читається, зачекайте…"; return; }
+      var res = findPages([q]);
+      if (res) {
+        matchEl.innerHTML = 'Знайдено «' + esc(q) + '» на стор.: ' + res.pages.slice(0, 12).join(", ") + (res.pages.length > 12 ? " …" : "");
+        showPage(res.pages[0]);
+      } else {
+        matchEl.textContent = "«" + q + "» не знайдено в тексті цього PDF.";
+      }
+    }
+    document.getElementById("pdf-search-btn").onclick = runSearch;
+    document.getElementById("pdf-search").onkeydown = function (e) { if (e.key === "Enter") runSearch(); };
+    document.getElementById("pdf-prev").onclick = function () { showPage(currentPage - 1); };
+    document.getElementById("pdf-next").onclick = function () { showPage(currentPage + 1); };
+    document.getElementById("pdf-use").onclick = async function () {
+      var TARGET = 2400;
+      var pageText = pageTexts[currentPage] || "";
+      var label = file.name.replace(/\.pdf$/i, "") + " — стор. " + currentPage;
+      var dataUrl;
+
+      if (selection) {
+        // Render the page big enough that the selected region alone comes out at
+        // TARGET px wide, then cut exactly that region.
+        var full = await renderPdfPageToCanvas(pdfDoc, currentPage, Math.round(TARGET / selection.w));
+        var sx = Math.round(selection.x * full.width), sy = Math.round(selection.y * full.height);
+        var sw = Math.round(selection.w * full.width), sh = Math.round(selection.h * full.height);
+        var out = document.createElement("canvas");
+        out.width = sw; out.height = sh;
+        out.getContext("2d").drawImage(full, sx, sy, sw, sh, 0, 0, sw, sh);
+        dataUrl = out.toDataURL("image/png");
+        label += " (виділена ділянка)";
+      } else {
+        var canvas = await renderPdfPageToCanvas(pdfDoc, currentPage, TARGET);
+        dataUrl = canvas.toDataURL("image/png");
+      }
+
+      root.innerHTML = "";
+      onConfirm(dataUrl, label, pageText, !!selection);
+    };
+  }
+
   // ---------- render dispatch ----------
   function render() {
     var parts = parseHash();
+    var current = parts.length === 0 ? "/" : "/" + parts[0];
     document.querySelectorAll(".navlink").forEach(function (a) {
-      a.classList.toggle("active", a.dataset.nav === "/" && parts.length === 0);
+      a.classList.toggle("active", a.dataset.nav === current);
     });
     var app = document.getElementById("app");
-    if (parts.length === 0) { app.innerHTML = ProjectsPage(); bindProjectsPage(); return; }
-    if (parts[0] === "project" && parts[2] === "history") { app.innerHTML = HistoryPage(Number(parts[1])); bindHistoryPage(Number(parts[1])); return; }
-    if (parts[0] === "project") { app.innerHTML = UploadPage(Number(parts[1])); bindUploadPage(Number(parts[1])); return; }
+    if (parts.length === 0) { app.innerHTML = MainPage(); bindMainPage(); return; }
+    if (parts[0] === "history") { app.innerHTML = HistoryPage(); bindHistoryPage(); return; }
     if (parts[0] === "run") { app.innerHTML = ReviewPage(Number(parts[1])); bindReviewPage(Number(parts[1])); return; }
     app.innerHTML = "<p class='empty'>Сторінку не знайдено.</p>";
   }
 
   function esc(s) { var d = document.createElement("div"); d.textContent = s == null ? "" : String(s); return d.innerHTML; }
 
-  // ---------- Projects page ----------
-  function ProjectsPage() {
-    var rows = state.projects.map(function (p) {
-      return '<li><div class="list-item" data-open-project="' + p.id + '">' +
-        '<span style="font-weight:600;">' + esc(p.name) + '</span>' +
-        '<span class="faint" style="font-size:11px;">' + new Date(p.created_at).toLocaleDateString() + '</span>' +
-        '</div></li>';
-    }).join("");
-    return (
-      '<div style="max-width:640px;">' +
-        '<h1>Проєкти</h1>' +
-        '<p class="muted" style="margin-bottom:16px;">Порівняння архітектурних рендерів із кресленнями — семантично, без перевірки розмірів.</p>' +
-        '<div class="row" style="margin-bottom:12px;">' +
-          '<input type="text" id="new-project-name" placeholder="Назва проєкту, напр. 29 East 64th St" style="flex:1;">' +
-          '<button class="btn btn-primary" id="create-project-btn">+ Новий проєкт</button>' +
-        '</div>' +
-        '<button class="btn btn-sm" id="seed-demo-btn" style="margin-bottom:16px;">✨ Завантажити демо-проєкт (щоб одразу побачити, як усе працює)</button>' +
-        (state.projects.length === 0
-          ? '<p class="empty">Проєктів ще немає. Створіть перший вище або натисніть «Завантажити демо-проєкт».</p>'
-          : '<ul class="list card">' + rows + '</ul>') +
-      '</div>'
-    );
-  }
-  function bindProjectsPage() {
-    document.getElementById("create-project-btn").onclick = function () {
-      var input = document.getElementById("new-project-name");
-      var name = input.value.trim();
-      if (!name) return;
-      var id = nextId("project");
-      state.projects.unshift({ id: id, name: name, created_at: new Date().toISOString() });
-      saveState();
-      navigate("/project/" + id);
-    };
-    document.getElementById("seed-demo-btn").onclick = function () {
-      var id = seedDemoProject();
-      navigate("/project/" + id);
-    };
-    document.querySelectorAll("[data-open-project]").forEach(function (el) {
-      el.onclick = function () { navigate("/project/" + el.dataset.openProject); };
-    });
+  // ---------- data durability ----------
+  // Browser storage is evictable by default: under disk pressure the browser may clear
+  // it without asking. This asks for the "persistent" bucket, which it won't auto-evict.
+  // It is not a guarantee — the user clearing site data still wipes everything, which is
+  // why the file backup below exists.
+  function requestPersistentStorage() {
+    if (!navigator.storage || !navigator.storage.persist) return;
+    navigator.storage.persisted().then(function (already) {
+      if (!already) navigator.storage.persist().catch(function () {});
+    }).catch(function () {});
   }
 
-  // ---------- Upload page ----------
-  function AssetPicker(title, kind, projectId, selectedId) {
-    var assets = assetsOf(projectId, kind);
-    var thumbs = assets.map(function (a) {
-      var img = a.dataUrl ? '<img src="' + a.dataUrl + '">' : '<div class="ph">' + esc((a.name.split(".").pop() || "").toUpperCase()) + '</div>';
-      return '<button class="thumb ' + (a.id === selectedId ? "selected" : "") + '" data-select-asset="' + a.id + '" data-kind="' + kind + '">' +
-        img + '<div class="cap">' + esc(a.name) + '</div></button>';
-    }).join("");
-    return (
-      '<div class="card" style="padding:14px;">' +
-        '<div class="row" style="justify-content:space-between; margin-bottom:10px;">' +
-          '<h3 style="margin:0; font-size:14px;">' + esc(title) + '</h3>' +
-          '<label class="btn btn-sm" style="cursor:pointer;">+ Завантажити<input type="file" accept="image/*" data-upload-kind="' + kind + '" style="display:none;"></label>' +
-        '</div>' +
-        (assets.length === 0 ? '<p class="muted">Немає завантажених файлів.</p>' : '<div class="thumbgrid">' + thumbs + '</div>') +
-      '</div>'
-    );
+  function storageInfoHtml(cb) {
+    if (!navigator.storage || !navigator.storage.estimate) { cb(""); return; }
+    navigator.storage.estimate().then(function (est) {
+      var usedMb = (est.usage || 0) / 1048576;
+      var quotaMb = (est.quota || 0) / 1048576;
+      (navigator.storage.persisted ? navigator.storage.persisted() : Promise.resolve(false))
+        .then(function (persisted) {
+          cb('Сховище браузера: ' + usedMb.toFixed(1) + ' МБ з ' + quotaMb.toFixed(0) + ' МБ · ' +
+             (persisted ? 'режим «постійне» — браузер не витісняє дані автоматично'
+                        : '⚠️ режим «тимчасове» — браузер може очистити дані під тиском місця'));
+        }).catch(function () { cb(""); });
+    }).catch(function () { cb(""); });
   }
-  function UploadPage(projectId) {
-    var project = findProject(projectId);
-    if (!project) return "<p class='empty'>Проєкт не знайдено. <a href='#/'>До проєктів</a></p>";
+
+  function exportBackup(includeImages) {
+    var assets = state.assets.map(function (a) {
+      var o = { id: a.id, project_id: a.project_id, kind: a.kind, name: a.name, pdfText: a.pdfText || "" };
+      if (includeImages && a.dataUrl) o.dataUrl = a.dataUrl;
+      return o;
+    });
+    var backup = {
+      format: "renderqc-backup",
+      version: 1,
+      exported_at: new Date().toISOString(),
+      includes_images: !!includeImages,
+      data: {
+        projects: state.projects, assets: assets,
+        runs: state.runs, discrepancies: state.discrepancies, seq: state.seq
+      }
+    };
+    var blob = new Blob([JSON.stringify(backup)], { type: "application/json" });
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "render-qc-backup-" + new Date().toISOString().slice(0, 10) + (includeImages ? "-full" : "") + ".json";
+    document.body.appendChild(a); a.click(); a.remove();
+    toast(includeImages ? "Повна копія збережена (з зображеннями)." : "Копію збережено (без зображень — метрики й історія повні).");
+  }
+
+  function importBackup(file) {
+    var reader = new FileReader();
+    reader.onload = function (e) {
+      var parsed;
+      try { parsed = JSON.parse(e.target.result); } catch (err) { toast("Файл пошкоджено — це не резервна копія."); return; }
+      if (!parsed || parsed.format !== "renderqc-backup" || !parsed.data || !parsed.data.seq) {
+        toast("Це не файл резервної копії Render QC."); return;
+      }
+      var d = parsed.data;
+      var summary = (d.runs || []).length + " перевірок і " + (d.discrepancies || []).length + " знахідок";
+      if (!confirm("Відновити з копії?\n\nБуде замінено ВСІ поточні дані на: " + summary + ".\nЦю дію не можна скасувати.")) return;
+
+      state = {
+        projects: d.projects || [], assets: d.assets || [],
+        runs: d.runs || [], discrepancies: d.discrepancies || [], seq: d.seq
+      };
+      var writes = state.assets.map(function (a) {
+        return (a.dataUrl || a.pdfText) ? idbPutBlob(a.id, a.dataUrl, a.pdfText).catch(function () {}) : Promise.resolve();
+      });
+      Promise.all(writes).then(function () {
+        saveState();
+        toast("Відновлено: " + summary + (parsed.includes_images ? "." : " (без зображень — мініатюри будуть порожні)."));
+        render();
+      });
+    };
+    reader.onerror = function () { toast("Не вдалося прочитати файл."); };
+    reader.readAsText(file);
+  }
+
+  // ---------- History page (full metrics per iteration, for tracking F1 over time) ----------
+  function allRunsNewestFirst() {
+    return state.runs.slice().sort(function (a, b) { return new Date(b.created_at) - new Date(a.created_at); });
+  }
+  function HistoryPage() {
+    var runs = allRunsNewestFirst();
+    if (runs.length === 0) {
+      return '<div>' +
+        '<a href="#/" class="faint" style="font-size:11px;">&larr; На головну</a>' +
+        '<h1 style="font-size:18px;">Історія перевірок</h1>' +
+        '<div id="storage-info" class="faint" style="font-size:11px; margin-bottom:10px;"></div>' +
+        '<div class="card" style="padding:24px; text-align:center;">' +
+          '<p class="muted" style="margin-bottom:12px;">Перевірок ще не було. Якщо у вас є резервна копія — відновіть її.</p>' +
+          '<label class="btn btn-sm" style="cursor:pointer;">⬆ Відновити з копії<input type="file" accept=".json,application/json" id="restore-input" style="display:none;"></label>' +
+        '</div>' +
+      '</div>';
+    }
+    var rows = runs.map(function (r) {
+      var m = calcMetrics(discrepanciesOf(r.id));
+      var reviewed = m.tp + m.fp + m.fn;
+      var renderAsset = findAsset(r.render_asset_id);
+      var thumb = renderAsset && renderAsset.dataUrl
+        ? '<img src="' + renderAsset.dataUrl + '" style="width:36px; height:36px; object-fit:cover; border-radius:5px;">'
+        : '<div style="width:36px; height:36px; border-radius:5px; background:#f1f5f9;"></div>';
+      return '<tr data-open-run="' + r.id + '">' +
+        '<td>' + thumb + '</td>' +
+        '<td><b>#' + r.id + '</b></td>' +
+        '<td class="faint" style="white-space:nowrap;">' + new Date(r.created_at).toLocaleString() + '</td>' +
+        '<td>' + m.total + '</td>' +
+        '<td style="color:var(--green);">' + m.tp + '</td>' +
+        '<td style="color:var(--red);">' + m.fp + '</td>' +
+        '<td style="color:var(--purple);">' + m.fn + '</td>' +
+        '<td>' + m.precision.toFixed(2) + '</td>' +
+        '<td>' + m.recall.toFixed(2) + '</td>' +
+        '<td><b>' + m.f1.toFixed(2) + '</b></td>' +
+        '<td class="faint">' + (reviewed === 0 ? "не переглянуто" : m.unreviewed > 0 ? (m.unreviewed + " без оцінки") : "повністю") + '</td>' +
+      '</tr>';
+    }).join("");
+
+    // Averages only over runs the user actually reviewed — unreviewed runs have F1 = 0
+    // by construction and would drag the trend down for no real reason.
+    var scored = runs.filter(function (r) {
+      var m = calcMetrics(discrepanciesOf(r.id));
+      return (m.tp + m.fp + m.fn) > 0;
+    }).map(function (r) { return calcMetrics(discrepanciesOf(r.id)); });
+    var avgF1 = scored.length ? scored.reduce(function (s, m) { return s + m.f1; }, 0) / scored.length : 0;
+    var last5 = scored.slice(0, 5);
+    var avgLast5 = last5.length ? last5.reduce(function (s, m) { return s + m.f1; }, 0) / last5.length : 0;
+    var best = scored.length ? Math.max.apply(null, scored.map(function (m) { return m.f1; })) : 0;
+
+    var summary =
+      '<div class="card metrics" style="margin-bottom:14px;">' +
+        '<div class="stat"><div class="v">' + runs.length + '</div><div class="l">усього перевірок</div></div>' +
+        '<div class="stat"><div class="v">' + scored.length + '</div><div class="l">оцінено вручну</div></div>' +
+        '<div class="stat"><div class="v" style="color:var(--brand-700);">' + avgF1.toFixed(2) + '</div><div class="l">середній F1</div></div>' +
+        '<div class="stat"><div class="v" style="color:var(--brand-700);">' + avgLast5.toFixed(2) + '</div><div class="l">F1 за останні 5</div></div>' +
+        '<div class="stat"><div class="v" style="color:var(--green);">' + best.toFixed(2) + '</div><div class="l">найкращий F1</div></div>' +
+        '<div class="stat"><div class="v">' + (avgLast5 >= avgF1 ? "↑" : "↓") + '</div><div class="l">динаміка</div></div>' +
+      '</div>';
+
     return (
       '<div>' +
-        '<div class="row" style="justify-content:space-between; margin-bottom:16px;">' +
-          '<div><a href="#/" class="faint" style="font-size:11px;">&larr; Проєкти</a><h1>' + esc(project.name) + '</h1></div>' +
-          '<a href="#/project/' + projectId + '/history" class="btn btn-sm">Історія перевірок</a>' +
+        '<div class="row" style="justify-content:space-between; margin-bottom:10px;">' +
+          '<div class="row" style="gap:10px;"><a href="#/" class="faint" style="font-size:11px;">&larr; На головну</a>' +
+          '<h1 style="margin:0; font-size:18px;">Історія перевірок</h1></div>' +
+          '<div class="row" style="gap:6px; flex-wrap:wrap;">' +
+            '<button class="btn btn-sm" id="export-history-btn">⬇ Метрики CSV</button>' +
+            '<button class="btn btn-sm" id="backup-btn">💾 Резервна копія</button>' +
+            '<button class="btn btn-sm" id="backup-full-btn">💾 Копія з зображеннями</button>' +
+            '<label class="btn btn-sm" style="cursor:pointer;">⬆ Відновити<input type="file" accept=".json,application/json" id="restore-input" style="display:none;"></label>' +
+          '</div>' +
         '</div>' +
-        '<div class="grid2" style="margin-bottom:16px;" id="picker-container"></div>' +
-        '<button class="btn btn-primary" id="run-analysis-btn">Запустити перевірку відповідності</button>' +
+        '<div id="storage-info" class="faint" style="font-size:11px; margin-bottom:10px;"></div>' +
+        summary +
+        '<div style="overflow-x:auto;"><table class="table card" style="min-width:820px;">' +
+          '<thead><tr><th></th><th>#</th><th>Дата</th><th>Знайдено</th><th>TP</th><th>FP</th><th>FN</th>' +
+          '<th>Precision</th><th>Recall</th><th>F1</th><th>Стан</th></tr></thead>' +
+          '<tbody>' + rows + '</tbody>' +
+        '</table></div>' +
+        '<p class="muted" style="font-size:12px; margin-top:10px;">F1 рахується лише з оцінених вами знахідок (✅ TP / ❌ FP / ➕ FN). Перевірка без жодної оцінки має F1 = 0 і не входить у середні.</p>' +
       '</div>'
     );
   }
-  var uploadSelection = {};
-  function bindUploadPage(projectId) {
-    var renders = assetsOf(projectId, "render");
-    var drawings = assetsOf(projectId, "drawing");
-    if (uploadSelection.projectId !== projectId) {
-      uploadSelection = { projectId: projectId, renderId: renders[0] ? renders[0].id : null, drawingId: drawings[0] ? drawings[0].id : null };
+  function bindHistoryPage() {
+    document.querySelectorAll("[data-open-run]").forEach(function (el) {
+      el.onclick = function () { navigate("/run/" + el.dataset.openRun); };
+    });
+    var btn = document.getElementById("export-history-btn");
+    if (btn) btn.onclick = exportHistoryCsv;
+    var b1 = document.getElementById("backup-btn");
+    if (b1) b1.onclick = function () { exportBackup(false); };
+    var b2 = document.getElementById("backup-full-btn");
+    if (b2) b2.onclick = function () { exportBackup(true); };
+    var ri = document.getElementById("restore-input");
+    if (ri) ri.onchange = function () {
+      var f = ri.files[0]; ri.value = "";
+      if (f) importBackup(f);
+    };
+    var info = document.getElementById("storage-info");
+    if (info) storageInfoHtml(function (txt) { info.textContent = txt; });
+  }
+  function exportHistoryCsv() {
+    var rows = [["run_id", "created_at", "render_file", "drawing_file", "found", "tp", "fp", "fn", "unreviewed", "precision", "recall", "f1"]];
+    allRunsNewestFirst().forEach(function (r) {
+      var m = calcMetrics(discrepanciesOf(r.id));
+      var ra = findAsset(r.render_asset_id), da = findAsset(r.drawing_asset_id);
+      rows.push([r.id, r.created_at, ra ? ra.name : "", da ? da.name : "",
+        m.total, m.tp, m.fp, m.fn, m.unreviewed,
+        m.precision.toFixed(4), m.recall.toFixed(4), m.f1.toFixed(4)]);
+    });
+    var csv = rows.map(function (r) {
+      return r.map(function (v) {
+        var s = v == null ? "" : String(v);
+        return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+      }).join(",");
+    }).join("\n");
+    var blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "render_qc_history.csv";
+    document.body.appendChild(a); a.click(); a.remove();
+  }
+
+  function getDefaultProjectId() {
+    if (state.projects.length === 0) {
+      var id = nextId("project");
+      state.projects.push({ id: id, name: "Мій робочий простір", created_at: new Date().toISOString() });
+      saveState();
     }
-    refreshPicker();
+    return state.projects[0].id;
+  }
 
-    function refreshPicker() {
-      var container = document.getElementById("picker-container");
-      container.innerHTML =
-        AssetPicker("Рендери", "render", projectId, uploadSelection.renderId) +
-        AssetPicker("Креслення", "drawing", projectId, uploadSelection.drawingId);
-      container.querySelectorAll("[data-select-asset]").forEach(function (el) {
-        el.onclick = function () {
-          var kind = el.dataset.kind, id = Number(el.dataset.selectAsset);
-          if (kind === "render") uploadSelection.renderId = id; else uploadSelection.drawingId = id;
-          refreshPicker();
-        };
-      });
-      container.querySelectorAll("[data-upload-kind]").forEach(function (input) {
-        input.onchange = function () {
-          var file = input.files[0];
-          if (!file) return;
-          var kind = input.dataset.uploadKind;
-          fileToResizedDataUrl(file, 1200, function (dataUrl) {
-            var id = nextId("asset");
-            state.assets.unshift({ id: id, project_id: projectId, kind: kind, name: file.name, dataUrl: dataUrl });
-            if (kind === "render") uploadSelection.renderId = id; else uploadSelection.drawingId = id;
-            saveState();
-            refreshPicker();
-            toast("Файл завантажено.");
-          });
-        };
-      });
+  // ---------- Main page (upload + history, single workspace) ----------
+  function AssetPicker(title, kind, projectId, selectedId, switcherOpen) {
+    var assets = assetsOf(projectId, kind);
+    var selected = assets.find(function (a) { return a.id === selectedId; });
+    var others = assets.filter(function (a) { return a.id !== selectedId; });
+
+    var slotHtml;
+    if (selected) {
+      var img = selected.dataUrl ? '<img src="' + selected.dataUrl + '">' : '<div class="ph">' + esc((selected.name.split(".").pop() || "").toUpperCase()) + '</div>';
+      slotHtml =
+        '<div class="uploadslot filled" data-slot="' + kind + '" data-toggle-switcher="' + kind + '">' + img + '</div>' +
+        '<div style="margin-top:4px; font-size:11px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">' + esc(selected.name) + '</div>';
+    } else {
+      slotHtml =
+        '<label class="uploadslot empty" data-slot="' + kind + '">' +
+          '<span style="font-size:18px;">📤</span>' +
+          '<span>Перетягніть файл сюди<br>або натисніть</span>' +
+          '<input type="file" accept="image/*,.pdf,.dwg" data-upload-kind="' + kind + '" style="display:none;">' +
+        '</label>';
     }
 
-    var runBtn = document.getElementById("run-analysis-btn");
-    var settings = loadSettings();
-    runBtn.textContent = settings.anthropicApiKey
-      ? "Запустити перевірку відповідності (🤖 реальний AI)"
-      : "Запустити перевірку відповідності (🎲 мок)";
-    runBtn.onclick = async function () {
-      if (!uploadSelection.renderId || !uploadSelection.drawingId) { toast("Оберіть і рендер, і креслення."); return; }
-      var runId = nextId("run");
-      var renderAsset = findAsset(uploadSelection.renderId);
-      var drawingAsset = findAsset(uploadSelection.drawingId);
-      state.runs.unshift({ id: runId, project_id: projectId, render_asset_id: uploadSelection.renderId, drawing_asset_id: uploadSelection.drawingId, created_at: new Date().toISOString() });
+    var switcherHtml = "";
+    if (switcherOpen) {
+      var items = others.map(function (a) {
+        return '<div class="switcher-item" data-select-asset="' + a.id + '" data-kind="' + kind + '">' + esc(a.name) + '</div>';
+      }).join("");
+      switcherHtml =
+        '<div class="switcher">' +
+          (items || '<div class="switcher-item" style="color:var(--faint); cursor:default;">Інших файлів немає</div>') +
+          '<label class="switcher-item" style="color:var(--brand-600); cursor:pointer;">+ Завантажити новий<input type="file" accept="image/*,.pdf,.dwg" data-upload-kind="' + kind + '" style="display:none;"></label>' +
+        '</div>';
+    }
 
-      var findings;
-      var s = loadSettings();
-      if (s.anthropicApiKey) {
-        runBtn.disabled = true;
-        runBtn.textContent = "🤖 Аналізуємо через Claude Vision…";
-        try {
-          findings = await callClaudeVision(drawingAsset, renderAsset, s);
-        } catch (err) {
-          toast("Реальний AI недоступний (" + err.message + ") — використано мок-дані.");
-          findings = runComparison(runId);
+    return (
+      '<div class="card" style="padding:14px; margin-bottom:12px;">' +
+        '<div class="row" style="justify-content:space-between; margin-bottom:8px;">' +
+          '<h3 style="margin:0; font-size:14px;">' + esc(title) + '</h3>' +
+          (selected ? '<a class="faint" style="font-size:11px; cursor:pointer;" data-toggle-switcher="' + kind + '">Змінити</a>' : '') +
+        '</div>' +
+        slotHtml +
+        switcherHtml +
+      '</div>'
+    );
+  }
+  function MainPage() {
+    return (
+      '<div>' +
+        '<h1 style="margin-bottom:14px;">Render QC</h1>' +
+        '<div class="mainlayout">' +
+          '<div id="sidebar-container"></div>' +
+          '<div id="history-container"></div>' +
+        '</div>' +
+      '</div>'
+    );
+  }
+  var mainSelection = { renderId: null, drawingId: null, switcher: { render: false, drawing: false } };
+  function bindMainPage() {
+    var pid = getDefaultProjectId();
+    // Reset on every visit to the home page — upload windows always start empty.
+    mainSelection = { renderId: null, drawingId: null, switcher: { render: false, drawing: false } };
+
+    function refreshSidebar() {
+      var wrap = document.getElementById("sidebar-container");
+      wrap.innerHTML =
+        AssetPicker("Рендер", "render", pid, mainSelection.renderId, mainSelection.switcher.render) +
+        AssetPicker("Креслення", "drawing", pid, mainSelection.drawingId, mainSelection.switcher.drawing) +
+        '<button class="btn btn-primary" id="run-analysis-btn" style="width:100%;">Перевірити</button>';
+
+      function handleIncomingFile(file, kind) {
+        function addAsset(dataUrl, name, pageText, userCropped) {
+          var id = nextId("asset");
+          var asset = { id: id, project_id: pid, kind: kind, name: name, dataUrl: dataUrl };
+          if (pageText) asset.pdfText = pageText;
+          // The user framed the elevation herself — never let auto-crop override that choice.
+          if (userCropped) asset.userCropped = true;
+          state.assets.unshift(asset);
+          idbPutBlob(id, dataUrl, pageText).catch(function () {});
+          if (kind === "render") mainSelection.renderId = id; else mainSelection.drawingId = id;
+          mainSelection.switcher[kind] = false;
+          saveState();
+          refreshSidebar();
+          toast(pageText ? "Сторінку взято разом із текстовим шаром." : "Файл завантажено.");
         }
-      } else {
-        findings = runComparison(runId);
+        if (isDwgFile(file)) {
+          toast("DWG напряму не читається в браузері. Експортуйте елевацію в PDF або PNG/JPG (наприклад через ODA File Converter) і завантажте цей файл.");
+          return;
+        }
+        if (isPdfFile(file)) {
+          // If a render is already chosen, use its filename to auto-locate the matching plan.
+          var selectedRender = findAsset(mainSelection.renderId);
+          var plans = kind === "drawing" && selectedRender ? planNameFromRenderName(selectedRender.name) : null;
+          var style = kind === "drawing" && selectedRender ? elevationStyleFromRenderName(selectedRender.name) : null;
+          openPdfPagePicker(file, function (dataUrl, label, pageText, userCropped) {
+            addAsset(dataUrl, label, pageText, userCropped);
+          }, plans, style);
+          return;
+        }
+        fileToResizedDataUrl(file, 2400, function (dataUrl) { addAsset(dataUrl, file.name); });
       }
 
-      findings.forEach(function (f) {
-        var did = nextId("discrepancy");
-        state.discrepancies.push(Object.assign({ id: did, run_id: runId, review_status: "unreviewed", is_user_added: false, created_at: new Date().toISOString() }, f));
+      wrap.querySelectorAll("[data-toggle-switcher]").forEach(function (el) {
+        el.onclick = function () {
+          var kind = el.dataset.toggleSwitcher;
+          mainSelection.switcher[kind] = !mainSelection.switcher[kind];
+          refreshSidebar();
+        };
       });
-      saveState();
-      navigate("/run/" + runId);
-    };
+      wrap.querySelectorAll("[data-select-asset]").forEach(function (el) {
+        el.onclick = function () {
+          var kind = el.dataset.kind, id = Number(el.dataset.selectAsset);
+          if (kind === "render") mainSelection.renderId = id; else mainSelection.drawingId = id;
+          mainSelection.switcher[kind] = false;
+          refreshSidebar();
+        };
+      });
+      wrap.querySelectorAll("[data-upload-kind]").forEach(function (input) {
+        input.onchange = function () {
+          var file = input.files[0];
+          input.value = "";
+          if (!file) return;
+          handleIncomingFile(file, input.dataset.uploadKind);
+        };
+      });
+      wrap.querySelectorAll("[data-slot]").forEach(function (slot) {
+        var kind = slot.dataset.slot;
+        slot.addEventListener("dragover", function (e) { e.preventDefault(); slot.classList.add("dragover"); });
+        slot.addEventListener("dragleave", function () { slot.classList.remove("dragover"); });
+        slot.addEventListener("drop", function (e) {
+          e.preventDefault();
+          slot.classList.remove("dragover");
+          var file = e.dataTransfer.files && e.dataTransfer.files[0];
+          if (file) handleIncomingFile(file, kind);
+        });
+      });
+
+      var runBtn = document.getElementById("run-analysis-btn");
+      var settings = loadSettings();
+      runBtn.textContent = settings.anthropicApiKey ? "Перевірити (🤖 реальний AI)" : "Перевірити (🎲 мок)";
+      runBtn.onclick = async function () {
+        if (!mainSelection.renderId || !mainSelection.drawingId) { toast("Оберіть і рендер, і креслення."); return; }
+        var runId = nextId("run");
+        var renderAsset = findAsset(mainSelection.renderId);
+        var drawingAsset = findAsset(mainSelection.drawingId);
+        var runObj = { id: runId, project_id: pid, render_asset_id: mainSelection.renderId, drawing_asset_id: mainSelection.drawingId, created_at: new Date().toISOString() };
+        state.runs.unshift(runObj);
+
+        var findings;
+        var s = loadSettings();
+        if (s.anthropicApiKey) {
+          runBtn.disabled = true;
+          runBtn.textContent = "🤖 Аналізуємо через Claude Vision…";
+          try {
+            var result = await callClaudeVision(drawingAsset, renderAsset, s, function (msg) {
+              runBtn.textContent = msg;
+            });
+            findings = result.differences;
+            runObj.uncertain_areas = result.uncertain_areas;
+            runObj.summary = result.summary;
+
+            runBtn.textContent = "🔎 Перевіряю координати…";
+            var blankCount = 0;
+            for (var bi = 0; bi < findings.length; bi++) {
+              var f = findings[bi];
+              var dBlank = f.drawing_bbox ? await regionIsBlank(drawingAsset.dataUrl, f.drawing_bbox) : false;
+              var rBlank = f.render_bbox ? await regionIsBlank(renderAsset.dataUrl, f.render_bbox) : false;
+              if (dBlank || rBlank) {
+                blankCount++;
+                f.blank_bbox = true;
+                f.description = "⚠️ Рамка вказує на порожню ділянку " +
+                  (dBlank && rBlank ? "обох зображень" : dBlank ? "креслення" : "рендера") +
+                  " — координати ймовірно вигадані, перевірте вручну. " + f.description;
+                f.confidence = Math.min(f.confidence, 0.4);
+              }
+            }
+            if (blankCount > 0) {
+              toast("Позначено " + blankCount + " знахідк" + (blankCount === 1 ? "у" : "и") + " з рамкою на порожньому місці — вони підсвічені як сумнівні.");
+            }
+            if (result.uncertain_areas.length > 0) {
+              toast("AI позначив " + result.uncertain_areas.length + " област" + (result.uncertain_areas.length === 1 ? "ь" : "і") + " як неперевірні — вони показані окремо і не рахуються як помилки.");
+            }
+          } catch (err) {
+            toast("Реальний AI недоступний (" + err.message + ") — використано мок-дані.");
+            findings = runComparison(runId);
+          }
+        } else {
+          findings = runComparison(runId);
+        }
+
+        findings.forEach(function (f) {
+          var did = nextId("discrepancy");
+          state.discrepancies.push(Object.assign({ id: did, run_id: runId, review_status: "unreviewed", is_user_added: false, created_at: new Date().toISOString() }, f));
+        });
+        saveState();
+        navigate("/run/" + runId);
+      };
+    }
+
+    function refreshHistory() {
+      var wrap = document.getElementById("history-container");
+      var runs = state.runs.filter(function (r) { return r.project_id === pid; })
+        .sort(function (a, b) { return new Date(b.created_at) - new Date(a.created_at); });
+      if (runs.length === 0) {
+        wrap.innerHTML =
+          '<div class="card" style="padding:24px; text-align:center;">' +
+            '<p class="muted" style="margin-bottom:12px;">Перевірок ще не було. Завантажте рендер і креслення зліва й натисніть «Перевірити».</p>' +
+            '<button class="btn btn-sm" id="seed-demo-btn">✨ Завантажити демо-дані</button>' +
+          '</div>';
+        var seedBtn = document.getElementById("seed-demo-btn");
+        if (seedBtn) seedBtn.onclick = function () { seedDemoData(pid); refreshSidebar(); refreshHistory(); };
+        return;
+      }
+      var rowsHtml = runs.map(function (r) {
+        var m = calcMetrics(discrepanciesOf(r.id));
+        var renderAsset = findAsset(r.render_asset_id);
+        var thumb = renderAsset && renderAsset.dataUrl
+          ? '<img src="' + renderAsset.dataUrl + '" style="width:44px; height:44px; object-fit:cover; border-radius:6px; flex-shrink:0;">'
+          : '<div style="width:44px; height:44px; border-radius:6px; background:#f1f5f9; flex-shrink:0;"></div>';
+        return '<li><div class="list-item" data-open-run="' + r.id + '">' +
+          '<div class="row" style="gap:10px;">' + thumb +
+            '<div><div style="font-weight:600; font-size:13px;">Перевірка #' + r.id + '</div>' +
+            '<div class="faint" style="font-size:11px;">' + new Date(r.created_at).toLocaleString() + '</div></div>' +
+          '</div>' +
+          '<div class="row" style="gap:14px;">' +
+            '<span class="muted" style="font-size:12px;">' + m.total + ' помилок</span>' +
+            '<span class="badge" style="background:var(--brand-50); color:var(--brand-700);">F1 ' + m.f1.toFixed(2) + '</span>' +
+          '</div>' +
+        '</div></li>';
+      }).join("");
+      wrap.innerHTML =
+        '<div class="row" style="justify-content:space-between; margin-bottom:8px;">' +
+          '<span class="faint" style="font-size:11px;">Останні перевірки</span>' +
+          '<a href="#/history" style="font-size:11px; color:var(--brand-600);">Уся історія та метрики F1 &rarr;</a>' +
+        '</div>' +
+        '<ul class="list card">' + rowsHtml + '</ul>';
+      wrap.querySelectorAll("[data-open-run]").forEach(function (el) {
+        el.onclick = function () { navigate("/run/" + el.dataset.openRun); };
+      });
+    }
+
+    refreshSidebar();
+    refreshHistory();
   }
 
   // ---------- Review page ----------
@@ -688,6 +1923,12 @@
           statusBadge +
         '</div>' +
         '<p class="disc-desc">' + esc(d.description) + '</p>' +
+        (d.drawing_evidence || d.render_evidence
+          ? '<div style="margin-top:6px; padding-top:6px; border-top:1px dashed var(--border); font-size:11px; color:var(--muted); line-height:1.5;">' +
+              (d.drawing_evidence ? '<div><b>Креслення:</b> ' + esc(d.drawing_evidence) + '</div>' : '') +
+              (d.render_evidence ? '<div><b>Рендер:</b> ' + esc(d.render_evidence) + '</div>' : '') +
+            '</div>'
+          : '') +
         '<div class="disc-bottom">' +
           '<span class="faint" style="font-size:11px;">' + confOrManual + '</span>' +
           '<div class="row" style="gap:4px;" data-stop-select="1">' +
@@ -698,33 +1939,61 @@
       '</div>'
     );
   }
+  function UncertainSection(run) {
+    var areas = run.uncertain_areas || [];
+    if (areas.length === 0) return "";
+    var cards = areas.map(function (u) {
+      return '<div class="disc-card" style="border-style:dashed; background:#fafafa;">' +
+        '<div class="disc-name">' + esc(u.element_name) + '</div>' +
+        '<div class="disc-type">' + esc(u.category || "") + '</div>' +
+        '<p class="disc-desc">' + esc(u.reason) + '</p>' +
+        '<div style="margin-top:6px; padding-top:6px; border-top:1px dashed var(--border); font-size:11px; color:var(--muted); line-height:1.5;">' +
+          (u.drawing_observation ? '<div><b>Креслення:</b> ' + esc(u.drawing_observation) + '</div>' : '') +
+          (u.render_observation ? '<div><b>Рендер:</b> ' + esc(u.render_observation) + '</div>' : '') +
+        '</div>' +
+      '</div>';
+    }).join("");
+    return (
+      '<div style="margin-top:24px;">' +
+        '<h2 style="margin:0 0 4px; font-size:15px;">Неперевірні області <span class="faint" style="font-size:12px; font-weight:400;">' + areas.length + '</span></h2>' +
+        '<p class="muted" style="margin:0 0 8px; font-size:12px;">AI не зміг надійно перевірити ці місця (тінь, перспектива, перекриття). Це НЕ помилки — вони не входять у метрики. Перегляньте вручну.</p>' +
+        '<div class="disc-grid">' + cards + '</div>' +
+      '</div>'
+    );
+  }
   function ReviewPage(runId) {
     var run = findRun(runId);
     if (!run) return "<p class='empty'>Перевірку не знайдено. <a href='#/'>До проєктів</a></p>";
     return (
       '<div>' +
-        '<div class="row" style="justify-content:space-between; margin-bottom:16px;">' +
-          '<div><a href="#/project/' + run.project_id + '" class="faint" style="font-size:11px;">&larr; До проєкту</a><h1>Перевірка #' + run.id + '</h1></div>' +
+        '<div class="row" style="justify-content:space-between; margin-bottom:8px;">' +
+          '<div class="row" style="gap:10px;"><a href="#/" class="faint" style="font-size:11px;">&larr; На головну</a><h1 style="margin:0; font-size:17px;">Перевірка #' + run.id + '</h1></div>' +
           '<div class="row">' +
             '<button class="btn btn-sm" id="add-manual-btn">➕ Додати пропущену помилку</button>' +
             '<button class="btn btn-sm" id="export-csv-btn">⬇ Експорт CSV</button>' +
           '</div>' +
         '</div>' +
-        '<div class="card" id="metrics-panel" style="margin-bottom:14px;"></div>' +
-        '<div class="reviewgrid">' +
+        '<div class="card" id="metrics-panel" style="margin-bottom:12px;"></div>' +
+        '<div class="reviewtop">' +
           '<div id="drawing-panel"></div>' +
           '<div id="render-panel"></div>' +
-          '<div>' +
-            '<div class="filters">' +
-              '<select id="filter-type"><option value="">Усі типи елементів</option>' + ELEMENT_TYPES.map(function(t){return '<option value="'+t+'">'+t.replace(/_/g," ")+'</option>';}).join("") + '</select>' +
-              '<select id="filter-status"><option value="">Усі статуси</option>' + Object.keys(STATUS_LABEL).map(function(s){return '<option value="'+s+'">'+STATUS_LABEL[s]+'</option>';}).join("") + '</select>' +
-            '</div>' +
-            '<div class="row" style="justify-content:space-between; margin-bottom:8px;">' +
-              '<span class="faint" id="disc-count" style="font-size:11px;"></span>' +
+        '</div>' +
+        '<div style="margin-top:20px;">' +
+          '<div class="row" style="justify-content:space-between; align-items:center; margin-bottom:8px; flex-wrap:wrap; gap:10px;">' +
+            '<h2 style="margin:0; font-size:16px;">Знайдені невідповідності <span class="faint" id="disc-count" style="font-size:12px; font-weight:400;"></span></h2>' +
+            '<div class="row" style="gap:8px; flex-wrap:wrap;">' +
+              '<div class="filters" style="margin-bottom:0;">' +
+                '<select id="filter-type"><option value="">Усі типи елементів</option>' + ELEMENT_TYPES.map(function(t){return '<option value="'+t+'">'+t.replace(/_/g," ")+'</option>';}).join("") + '</select>' +
+                '<select id="filter-status"><option value="">Усі статуси</option>' + Object.keys(STATUS_LABEL).map(function(s){return '<option value="'+s+'">'+STATUS_LABEL[s]+'</option>';}).join("") + '</select>' +
+              '</div>' +
               '<div class="row" style="gap:4px;"><button class="btn btn-sm" id="prev-btn">&larr; Попередня</button><button class="btn btn-sm" id="next-btn">Наступна &rarr;</button></div>' +
             '</div>' +
-            '<div id="disc-list" style="max-height:70vh; overflow-y:auto; padding-right:2px;"></div>' +
           '</div>' +
+          '<div id="disc-list" class="disc-grid"></div>' +
+        '</div>' +
+        UncertainSection(run) +
+        '<div class="row" style="justify-content:flex-end; margin-top:20px;">' +
+          '<button class="btn btn-primary" id="next-run-btn">Наступна перевірка &rarr;</button>' +
         '</div>' +
         '<div id="modal-root"></div>' +
       '</div>'
@@ -735,6 +2004,20 @@
     var run = findRun(runId);
     if (!run) return;
     if (reviewUi.runId !== runId) reviewUi = { runId: runId, activeId: null, filterType: "", filterStatus: "" };
+
+    var siblingRuns = state.runs.filter(function (r) { return r.project_id === run.project_id; })
+      .sort(function (a, b) { return new Date(b.created_at) - new Date(a.created_at); });
+    var runIdx = siblingRuns.findIndex(function (r) { return r.id === runId; });
+    var nextRun = (runIdx >= 0 && runIdx < siblingRuns.length - 1) ? siblingRuns[runIdx + 1] : null;
+    var nextRunBtn = document.getElementById("next-run-btn");
+    if (nextRun) {
+      nextRunBtn.disabled = false;
+      nextRunBtn.textContent = "Наступна перевірка →";
+      nextRunBtn.onclick = function () { navigate("/run/" + nextRun.id); };
+    } else {
+      nextRunBtn.disabled = true;
+      nextRunBtn.textContent = "Це остання перевірка в історії";
+    }
 
     function currentList() {
       return discrepanciesOf(runId).filter(function (d) {
@@ -763,6 +2046,13 @@
           if (e.target.closest("[data-stop-select]")) return;
           reviewUi.activeId = Number(el.dataset.selectDisc);
           repaint();
+        });
+        var hoverId = el.dataset.selectDisc;
+        el.addEventListener("mouseenter", function () {
+          document.querySelectorAll('rect[data-select-disc="' + hoverId + '"]').forEach(function (r) { r.classList.add("hovered"); });
+        });
+        el.addEventListener("mouseleave", function () {
+          document.querySelectorAll('rect[data-select-disc="' + hoverId + '"]').forEach(function (r) { r.classList.remove("hovered"); });
         });
       });
       document.querySelectorAll("[data-review]").forEach(function (btn) {
@@ -871,36 +2161,6 @@
     document.body.appendChild(a); a.click(); a.remove();
   }
 
-  // ---------- History page ----------
-  function HistoryPage(projectId) {
-    var project = findProject(projectId);
-    if (!project) return "<p class='empty'>Проєкт не знайдено. <a href='#/'>До проєктів</a></p>";
-    var runs = state.runs.filter(function (r) { return r.project_id === projectId; });
-    var rowsHtml = runs.map(function (r) {
-      var m = calcMetrics(discrepanciesOf(r.id));
-      return '<tr data-open-run="' + r.id + '">' +
-        '<td>#' + r.id + '</td>' +
-        '<td class="faint">' + new Date(r.created_at).toLocaleString() + '</td>' +
-        '<td>' + m.precision.toFixed(2) + '</td>' +
-        '<td>' + m.recall.toFixed(2) + '</td>' +
-        '<td>' + m.f1.toFixed(2) + '</td>' +
-        '<td class="faint">' + m.tp + ' / ' + m.fp + ' / ' + m.fn + '</td>' +
-      '</tr>';
-    }).join("");
-    return (
-      '<div>' +
-        '<a href="#/project/' + projectId + '" class="faint" style="font-size:11px;">&larr; До проєкту</a>' +
-        '<h1>Історія перевірок — ' + esc(project.name) + '</h1>' +
-        (runs.length === 0 ? '<p class="empty">Перевірок ще не було.</p>' :
-          '<table class="table card" style="margin-top:12px;"><thead><tr><th>Перевірка</th><th>Дата</th><th>Precision</th><th>Recall</th><th>F1</th><th>TP / FP / FN</th></tr></thead><tbody>' + rowsHtml + '</tbody></table>') +
-      '</div>'
-    );
-  }
-  function bindHistoryPage() {
-    document.querySelectorAll("[data-open-run]").forEach(function (el) {
-      el.onclick = function () { navigate("/run/" + el.dataset.openRun); };
-    });
-  }
 })();
 </script>
 </body>
