@@ -110,7 +110,7 @@
 
   // Bump on every change. Shown in the header so a stale browser cache is obvious
   // at a glance instead of being mistaken for "the fix didn't work".
-  var APP_VERSION = "v35 · загальний F1 на головній";
+  var APP_VERSION = "v36 · розшифровка метрик";
 
   if (window.pdfjsLib) {
     pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js";
@@ -1856,15 +1856,26 @@
       return '<div class="faint" style="font-size:11px; text-align:right; line-height:1.4;">' +
              'Загальний F1<br>з\'явиться після першої оцінки ✅/❌</div>';
     }
+    // The raw counts get their review-button icons rather than TP/FP/FN initials —
+    // those icons are what the user actually clicks, so they need no decoding.
+    var tip =
+      "Загальний F1 по всіх перевірках разом (сумуються TP/FP/FN, потім рахується оцінка).\n\n" +
+      "Precision " + pct(m.precision) + " — скільки зі знахідок AI виявились справжніми: " +
+        m.tp + " з " + (m.tp + m.fp) + ".\n" +
+      "Recall " + pct(m.recall) + " — скільки реальних помилок AI помітив: " +
+        m.tp + " з " + (m.tp + m.fn) + ".\n\n" +
+      "✅ " + m.tp + " — підтверджені знахідки\n" +
+      "❌ " + m.fp + " — хибні тривоги\n" +
+      "➕ " + m.fn + " — пропущені, додані вами вручну";
     return (
-      '<a href="#/history" style="text-decoration:none; text-align:right; display:block;" ' +
-         'title="Micro-average по всіх перевірках: TP ' + m.tp + ', FP ' + m.fp + ', FN ' + m.fn + '">' +
+      '<a href="#/history" style="text-decoration:none; text-align:right; display:block;" title="' + esc(tip) + '">' +
         '<div class="faint" style="font-size:11px;">Загальний F1</div>' +
         '<div style="font-size:26px; font-weight:700; line-height:1.1; color:' + scoreColor(m.f1) + ';">' + pct(m.f1) + '</div>' +
-        '<div class="faint" style="font-size:11px;">P ' + pct(m.precision) + ' · R ' + pct(m.recall) +
-          ' · <span style="color:var(--green);">' + m.tp + '</span>/' +
-          '<span style="color:var(--red);">' + m.fp + '</span>/' +
-          '<span style="color:var(--purple);">' + m.fn + '</span></div>' +
+        '<div class="faint" style="font-size:11px;">точність ' + pct(m.precision) + ' · повнота ' + pct(m.recall) + '</div>' +
+        '<div class="faint" style="font-size:11px;">' +
+          '<span style="color:var(--green);">✅ ' + m.tp + '</span> · ' +
+          '<span style="color:var(--red);">❌ ' + m.fp + '</span> · ' +
+          '<span style="color:var(--purple);">➕ ' + m.fn + '</span></div>' +
       '</a>'
     );
   }
