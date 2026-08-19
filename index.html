@@ -110,7 +110,7 @@
 
   // Bump on every change. Shown in the header so a stale browser cache is obvious
   // at a glance instead of being mistaken for "the fix didn't work".
-  var APP_VERSION = "v33 · метрики у відсотках";
+  var APP_VERSION = "v34 · неперевірні області теж оцінюються";
 
   if (window.pdfjsLib) {
     pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js";
@@ -1069,7 +1069,11 @@
     var precision = (tp + fp) > 0 ? tp / (tp + fp) : 0;
     var recall = (tp + fn) > 0 ? tp / (tp + fn) : 0;
     var f1 = (precision + recall) > 0 ? (2 * precision * recall) / (precision + recall) : 0;
-    return { tp:tp, fp:fp, fn:fn, unreviewed:unreviewed, total:discs.length, precision:precision, recall:recall, f1:f1 };
+    // total counts everything under review; found excludes uncertain areas, which are
+    // flagged questions rather than claimed errors.
+    var uncertain = discs.filter(function (d) { return d.is_uncertain; }).length;
+    return { tp:tp, fp:fp, fn:fn, unreviewed:unreviewed, total:discs.length, uncertain:uncertain,
+             found:discs.length - uncertain, precision:precision, recall:recall, f1:f1 };
   }
 
   // Metrics are shown as percentages everywhere — "0.83" reads as a number with no
@@ -1687,7 +1691,7 @@
         '<td>' + thumb + '</td>' +
         '<td><b>#' + r.id + '</b></td>' +
         '<td class="faint" style="white-space:nowrap;">' + new Date(r.created_at).toLocaleString() + '</td>' +
-        '<td>' + m.total + '</td>' +
+        '<td>' + m.found + (m.uncertain ? ' <span class="faint">+' + m.uncertain + '❓</span>' : '') + '</td>' +
         '<td style="color:var(--green);">' + m.tp + '</td>' +
         '<td style="color:var(--red);">' + m.fp + '</td>' +
         '<td style="color:var(--purple);">' + m.fn + '</td>' +
@@ -1761,12 +1765,12 @@
     if (info) storageInfoHtml(function (txt) { info.textContent = txt; });
   }
   function exportHistoryCsv() {
-    var rows = [["run_id", "created_at", "render_file", "drawing_file", "found", "tp", "fp", "fn", "unreviewed", "precision", "recall", "f1"]];
+    var rows = [["run_id", "created_at", "render_file", "drawing_file", "found", "uncertain", "tp", "fp", "fn", "unreviewed", "precision", "recall", "f1"]];
     allRunsNewestFirst().forEach(function (r) {
       var m = calcMetrics(discrepanciesOf(r.id));
       var ra = findAsset(r.render_asset_id), da = findAsset(r.drawing_asset_id);
       rows.push([r.id, r.created_at, ra ? ra.name : "", da ? da.name : "",
-        m.total, m.tp, m.fp, m.fn, m.unreviewed,
+        m.found, m.uncertain, m.tp, m.fp, m.fn, m.unreviewed,
         m.precision.toFixed(4), m.recall.toFixed(4), m.f1.toFixed(4)]);
     });
     var csv = rows.map(function (r) {
@@ -1969,7 +1973,7 @@
               toast("Позначено " + blankCount + " знахідк" + (blankCount === 1 ? "у" : "и") + " з рамкою на порожньому місці — вони підсвічені як сумнівні.");
             }
             if (result.uncertain_areas.length > 0) {
-              toast("AI позначив " + result.uncertain_areas.length + " област" + (result.uncertain_areas.length === 1 ? "ь" : "і") + " як неперевірні — вони показані окремо і не рахуються як помилки.");
+              toast("AI позначив " + result.uncertain_areas.length + " област" + (result.uncertain_areas.length === 1 ? "ь" : "і") + " як неперевірні — вони внизу сторінки, оцініть їх ✅/❌ так само, як знахідки.");
             }
             var rejected = findings.filter(function (f) { return f.verification && f.verification.verdict === "rejected"; }).length;
             if (rejected > 0) {
@@ -1987,6 +1991,9 @@
         findings.forEach(function (f) {
           var did = nextId("discrepancy");
           state.discrepancies.push(Object.assign({ id: did, run_id: runId, review_status: "unreviewed", is_user_added: false, created_at: new Date().toISOString() }, f));
+        });
+        (runObj.uncertain_areas || []).forEach(function (u) {
+          state.discrepancies.push(uncertainToDiscrepancy(u, runId));
         });
         saveState();
         navigate("/run/" + runId);
@@ -2019,7 +2026,8 @@
             '<div class="faint" style="font-size:11px;">' + new Date(r.created_at).toLocaleString() + '</div></div>' +
           '</div>' +
           '<div class="row" style="gap:14px;">' +
-            '<span class="muted" style="font-size:12px;">' + m.total + ' помилок</span>' +
+            '<span class="muted" style="font-size:12px;">' + m.found + ' помилок' +
+              (m.uncertain ? ' + ' + m.uncertain + '❓' : '') + '</span>' +
             '<span class="badge" style="background:var(--brand-50); color:var(--brand-700);">F1 ' +
               ((m.tp + m.fp + m.fn) > 0 ? pct(m.f1) : "—") + '</span>' +
           '</div>' +
@@ -2081,15 +2089,42 @@
            (v.note ? '<div style="color:var(--muted); margin-top:2px;">' + esc(v.note) + '</div>' : '') +
            '</div>';
   }
+  // Uncertain areas are stored as discrepancies too, flagged, so they get the same
+  // review buttons and feed the same metrics once the user rules on them. Left
+  // unreviewed they still count for nothing.
+  function uncertainToDiscrepancy(u, runId) {
+    return {
+      id: nextId("discrepancy"),
+      run_id: runId,
+      is_uncertain: true,
+      is_user_added: false,
+      review_status: "unreviewed",
+      created_at: new Date().toISOString(),
+      element_name: u.element_name,
+      element_type: ELEMENT_TYPES.indexOf(u.category) !== -1 ? u.category : "",
+      category: u.category,
+      error_type: "",
+      description: u.reason,
+      drawing_evidence: u.drawing_observation,
+      render_evidence: u.render_observation,
+      confidence: typeof u.confidence === "number" ? u.confidence : 0.5,
+      drawing_bbox: u.drawing_bbox || null,
+      render_bbox: u.render_bbox || null
+    };
+  }
+
   function DiscCard(d, active) {
     var statusBadge = '<span class="badge" style="color:' + STATUS_COLOR[d.review_status] + '; background:' + STATUS_BG[d.review_status] + ';">' + STATUS_LABEL[d.review_status] + '</span>';
     var confOrManual = d.is_user_added ? "додано вручну" : ("Впевненість: " + Math.round(d.confidence * 100) + "%");
     var rejected = d.verification && d.verification.verdict === "rejected";
+    var subtitle = d.is_uncertain
+      ? "❓ Неперевірна область" + (d.category ? " · " + d.category : "")
+      : (ERROR_TYPE_LABEL[d.error_type] || d.error_type || "");
     return (
       '<div class="disc-card ' + (active ? "active" : "") + '" data-select-disc="' + d.id + '"' +
-        (rejected ? ' style="opacity:.72; border-style:dashed;"' : '') + '>' +
+        (rejected || d.is_uncertain ? ' style="opacity:' + (rejected ? ".72" : "1") + '; border-style:dashed;"' : '') + '>' +
         '<div class="disc-top">' +
-          '<div><div class="disc-name">' + esc(d.element_name) + '</div><div class="disc-type">' + esc(ERROR_TYPE_LABEL[d.error_type] || d.error_type) + '</div></div>' +
+          '<div><div class="disc-name">' + esc(d.element_name) + '</div><div class="disc-type">' + esc(subtitle) + '</div></div>' +
           statusBadge +
         '</div>' +
         '<p class="disc-desc">' + esc(d.description) + '</p>' +
@@ -2110,26 +2145,13 @@
       '</div>'
     );
   }
-  function UncertainSection(run) {
-    var areas = run.uncertain_areas || [];
-    if (areas.length === 0) return "";
-    var cards = areas.map(function (u) {
-      return '<div class="disc-card" style="border-style:dashed; background:#fafafa;">' +
-        '<div class="disc-name">' + esc(u.element_name) + '</div>' +
-        '<div class="disc-type">' + esc(u.category || "") + '</div>' +
-        '<p class="disc-desc">' + esc(u.reason) + '</p>' +
-        '<div style="margin-top:6px; padding-top:6px; border-top:1px dashed var(--border); font-size:11px; color:var(--muted); line-height:1.5;">' +
-          (u.drawing_observation ? '<div><b>Креслення:</b> ' + esc(u.drawing_observation) + '</div>' : '') +
-          (u.render_observation ? '<div><b>Рендер:</b> ' + esc(u.render_observation) + '</div>' : '') +
-        '</div>' +
-      '</div>';
-    }).join("");
+  function UncertainSectionHtml(list, activeId) {
+    if (!list.length) return "";
     return (
-      '<div style="margin-top:24px;">' +
-        '<h2 style="margin:0 0 4px; font-size:15px;">Неперевірні області <span class="faint" style="font-size:12px; font-weight:400;">' + areas.length + '</span></h2>' +
-        '<p class="muted" style="margin:0 0 8px; font-size:12px;">AI не зміг надійно перевірити ці місця (тінь, перспектива, перекриття). Це НЕ помилки — вони не входять у метрики. Перегляньте вручну.</p>' +
-        '<div class="disc-grid">' + cards + '</div>' +
-      '</div>'
+      '<h2 style="margin:0 0 4px; font-size:15px;">Неперевірні області <span class="faint" style="font-size:12px; font-weight:400;">' + list.length + '</span></h2>' +
+      '<p class="muted" style="margin:0 0 8px; font-size:12px;">AI не зміг надійно перевірити ці місця (тінь, перспектива, перекриття, надто дрібна позначка). ' +
+      'Оцініть їх так само: <b>✅</b> — тут справді помилка, <b>❌</b> — помилки немає. Оцінені йдуть у метрики нарівні зі знахідками; неоцінені не рахуються.</p>' +
+      '<div class="disc-grid">' + list.map(function (d) { return DiscCard(d, d.id === activeId); }).join("") + '</div>'
     );
   }
   function ReviewPage(runId) {
@@ -2162,7 +2184,7 @@
           '</div>' +
           '<div id="disc-list" class="disc-grid"></div>' +
         '</div>' +
-        UncertainSection(run) +
+        '<div id="uncertain-section" style="margin-top:24px;"></div>' +
         '<div class="row" style="justify-content:flex-end; margin-top:20px;">' +
           '<button class="btn btn-primary" id="next-run-btn">Наступна перевірка &rarr;</button>' +
         '</div>' +
@@ -2175,6 +2197,16 @@
     var run = findRun(runId);
     if (!run) return;
     if (reviewUi.runId !== runId) reviewUi = { runId: runId, activeId: null, filterType: "", filterStatus: "" };
+
+    // Runs saved before uncertain areas became reviewable keep them on the run object.
+    // Promote them to discrepancy records once, so old history is rateable too.
+    if ((run.uncertain_areas || []).length &&
+        !discrepanciesOf(runId).some(function (d) { return d.is_uncertain; })) {
+      run.uncertain_areas.forEach(function (u) {
+        state.discrepancies.push(uncertainToDiscrepancy(u, runId));
+      });
+      saveState();
+    }
 
     var siblingRuns = state.runs.filter(function (r) { return r.project_id === run.project_id; })
       .sort(function (a, b) { return new Date(b.created_at) - new Date(a.created_at); });
@@ -2190,10 +2222,16 @@
       nextRunBtn.textContent = "Це остання перевірка в історії";
     }
 
+    function passesFilters(d) {
+      return (!reviewUi.filterType || d.element_type === reviewUi.filterType) &&
+             (!reviewUi.filterStatus || d.review_status === reviewUi.filterStatus);
+    }
+    function uncertainList() {
+      return discrepanciesOf(runId).filter(function (d) { return d.is_uncertain && passesFilters(d); });
+    }
     function currentList() {
       return discrepanciesOf(runId).filter(function (d) {
-        return (!reviewUi.filterType || d.element_type === reviewUi.filterType) &&
-               (!reviewUi.filterStatus || d.review_status === reviewUi.filterStatus);
+        return !d.is_uncertain && passesFilters(d);
       }).sort(function (a, b) {
         // Findings the zoomed pass could not confirm sink to the bottom — they are
         // kept (a wrong rejection would otherwise hide a real error) but out of the way.
@@ -2217,6 +2255,8 @@
       document.getElementById("disc-list").innerHTML = list.length
         ? list.map(function (d) { return DiscCard(d, d.id === reviewUi.activeId); }).join("")
         : '<p class="empty">Немає результатів за поточними фільтрами.</p>';
+      document.getElementById("uncertain-section").innerHTML =
+        UncertainSectionHtml(uncertainList(), reviewUi.activeId);
 
       document.querySelectorAll("[data-select-disc]").forEach(function (el) {
         el.addEventListener("click", function (e) {
@@ -2248,7 +2288,8 @@
     document.getElementById("prev-btn").onclick = function () { step(-1); };
     document.getElementById("next-btn").onclick = function () { step(1); };
     function step(delta) {
-      var list = currentList();
+      // Navigation walks findings first, then uncertain areas — same order as the page.
+      var list = currentList().concat(uncertainList());
       if (!list.length) return;
       var idx = list.findIndex(function (d) { return d.id === reviewUi.activeId; });
       idx = (idx + delta + list.length) % list.length;
@@ -2321,9 +2362,11 @@
   function exportCsv(runId) {
     var discs = discrepanciesOf(runId);
     var m = calcMetrics(discs);
-    var rows = [["id","element_name","element_type","error_type","description","confidence","review_status","is_user_added","created_at"]];
+    var rows = [["id","element_name","element_type","error_type","kind","description","confidence","review_status","is_user_added","created_at"]];
     discs.forEach(function (d) {
-      rows.push([d.id, d.element_name, d.element_type, d.error_type, d.description, d.confidence, d.review_status, d.is_user_added, d.created_at]);
+      rows.push([d.id, d.element_name, d.element_type, d.error_type,
+        d.is_uncertain ? "uncertain" : "finding",
+        d.description, d.confidence, d.review_status, d.is_user_added, d.created_at]);
     });
     rows.push([]); rows.push(["Precision", m.precision.toFixed(4)]); rows.push(["Recall", m.recall.toFixed(4)]);
     rows.push(["F1", m.f1.toFixed(4)]); rows.push(["TP", m.tp]); rows.push(["FP", m.fp]); rows.push(["FN", m.fn]);
