@@ -110,7 +110,7 @@
 
   // Bump on every change. Shown in the header so a stale browser cache is obvious
   // at a glance instead of being mistaken for "the fix didn't work".
-  var APP_VERSION = "v37 · підписи TP / FP / FN";
+  var APP_VERSION = "v38 · Precision / Recall";
 
   if (window.pdfjsLib) {
     pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js";
@@ -1871,7 +1871,7 @@
       '<a href="#/history" style="text-decoration:none; text-align:right; display:block;" title="' + esc(tip) + '">' +
         '<div class="faint" style="font-size:11px;">Загальний F1</div>' +
         '<div style="font-size:26px; font-weight:700; line-height:1.1; color:' + scoreColor(m.f1) + ';">' + pct(m.f1) + '</div>' +
-        '<div class="faint" style="font-size:11px;">точність ' + pct(m.precision) + ' · повнота ' + pct(m.recall) + '</div>' +
+        '<div class="faint" style="font-size:11px;">Precision ' + pct(m.precision) + ' · Recall ' + pct(m.recall) + '</div>' +
         '<div class="faint" style="font-size:11px;">' +
           '<span style="color:var(--green);">✅ TP ' + m.tp + '</span> · ' +
           '<span style="color:var(--red);">❌ FP ' + m.fp + '</span> · ' +
