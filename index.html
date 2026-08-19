@@ -110,7 +110,7 @@
 
   // Bump on every change. Shown in the header so a stale browser cache is obvious
   // at a glance instead of being mistaken for "the fix didn't work".
-  var APP_VERSION = "v32 · висока роздільність креслення + перевірка знахідок на збільшенні";
+  var APP_VERSION = "v33 · метрики у відсотках";
 
   if (window.pdfjsLib) {
     pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js";
@@ -1072,6 +1072,13 @@
     return { tp:tp, fp:fp, fn:fn, unreviewed:unreviewed, total:discs.length, precision:precision, recall:recall, f1:f1 };
   }
 
+  // Metrics are shown as percentages everywhere — "0.83" reads as a number with no
+  // scale, "83%" reads as a score. CSV keeps the raw 0..1 values for analysis.
+  function pct(v) {
+    if (typeof v !== "number" || !isFinite(v)) return "—";
+    return Math.round(v * 100) + "%";
+  }
+
   // ---------- demo seed images (inline SVG data URIs) ----------
   function houseSvg(kind) {
     if (kind === "drawing") {
@@ -1684,9 +1691,9 @@
         '<td style="color:var(--green);">' + m.tp + '</td>' +
         '<td style="color:var(--red);">' + m.fp + '</td>' +
         '<td style="color:var(--purple);">' + m.fn + '</td>' +
-        '<td>' + m.precision.toFixed(2) + '</td>' +
-        '<td>' + m.recall.toFixed(2) + '</td>' +
-        '<td><b>' + m.f1.toFixed(2) + '</b></td>' +
+        '<td>' + (reviewed === 0 ? '<span class="faint">—</span>' : pct(m.precision)) + '</td>' +
+        '<td>' + (reviewed === 0 ? '<span class="faint">—</span>' : pct(m.recall)) + '</td>' +
+        '<td>' + (reviewed === 0 ? '<span class="faint">—</span>' : '<b>' + pct(m.f1) + '</b>') + '</td>' +
         '<td class="faint">' + (reviewed === 0 ? "не переглянуто" : m.unreviewed > 0 ? (m.unreviewed + " без оцінки") : "повністю") + '</td>' +
       '</tr>';
     }).join("");
@@ -1706,10 +1713,10 @@
       '<div class="card metrics" style="margin-bottom:14px;">' +
         '<div class="stat"><div class="v">' + runs.length + '</div><div class="l">усього перевірок</div></div>' +
         '<div class="stat"><div class="v">' + scored.length + '</div><div class="l">оцінено вручну</div></div>' +
-        '<div class="stat"><div class="v" style="color:var(--brand-700);">' + avgF1.toFixed(2) + '</div><div class="l">середній F1</div></div>' +
-        '<div class="stat"><div class="v" style="color:var(--brand-700);">' + avgLast5.toFixed(2) + '</div><div class="l">F1 за останні 5</div></div>' +
-        '<div class="stat"><div class="v" style="color:var(--green);">' + best.toFixed(2) + '</div><div class="l">найкращий F1</div></div>' +
-        '<div class="stat"><div class="v">' + (avgLast5 >= avgF1 ? "↑" : "↓") + '</div><div class="l">динаміка</div></div>' +
+        '<div class="stat"><div class="v" style="color:var(--brand-700);">' + (scored.length ? pct(avgF1) : "—") + '</div><div class="l">середній F1</div></div>' +
+        '<div class="stat"><div class="v" style="color:var(--brand-700);">' + (last5.length ? pct(avgLast5) : "—") + '</div><div class="l">F1 за останні 5</div></div>' +
+        '<div class="stat"><div class="v" style="color:var(--green);">' + (scored.length ? pct(best) : "—") + '</div><div class="l">найкращий F1</div></div>' +
+        '<div class="stat"><div class="v">' + (!scored.length ? "—" : avgLast5 >= avgF1 ? "↑" : "↓") + '</div><div class="l">динаміка</div></div>' +
       '</div>';
 
     return (
@@ -1731,7 +1738,7 @@
           '<th>Precision</th><th>Recall</th><th>F1</th><th>Стан</th></tr></thead>' +
           '<tbody>' + rows + '</tbody>' +
         '</table></div>' +
-        '<p class="muted" style="font-size:12px; margin-top:10px;">F1 рахується лише з оцінених вами знахідок (✅ TP / ❌ FP / ➕ FN). Перевірка без жодної оцінки має F1 = 0 і не входить у середні.</p>' +
+        '<p class="muted" style="font-size:12px; margin-top:10px;">F1 рахується лише з оцінених вами знахідок (✅ TP / ❌ FP / ➕ FN) і показаний у відсотках: 100% — усі помилки знайдено й жодної зайвої. Перевірка без жодної оцінки показує «—» і не входить у середні. У CSV значення лишаються у вигляді 0…1 для аналізу.</p>' +
       '</div>'
     );
   }
@@ -2013,7 +2020,8 @@
           '</div>' +
           '<div class="row" style="gap:14px;">' +
             '<span class="muted" style="font-size:12px;">' + m.total + ' помилок</span>' +
-            '<span class="badge" style="background:var(--brand-50); color:var(--brand-700);">F1 ' + m.f1.toFixed(2) + '</span>' +
+            '<span class="badge" style="background:var(--brand-50); color:var(--brand-700);">F1 ' +
+              ((m.tp + m.fp + m.fn) > 0 ? pct(m.f1) : "—") + '</span>' +
           '</div>' +
         '</div></li>';
       }).join("");
@@ -2255,10 +2263,12 @@
   }
   function MetricsHtml(m) {
     function stat(v, l, color) { return '<div class="stat"><div class="v" style="color:' + (color||"var(--text)") + ';">' + v + '</div><div class="l">' + l + '</div></div>'; }
+    // Nothing reviewed yet means the score is undefined, not zero.
+    var scored = (m.tp + m.fp + m.fn) > 0;
     return '<div class="metrics">' +
-      stat(m.precision.toFixed(2), "Precision", "var(--brand-700)") +
-      stat(m.recall.toFixed(2), "Recall", "var(--brand-700)") +
-      stat(m.f1.toFixed(2), "F1-score", "var(--brand-700)") +
+      stat(scored ? pct(m.precision) : "—", "Precision", "var(--brand-700)") +
+      stat(scored ? pct(m.recall) : "—", "Recall", "var(--brand-700)") +
+      stat(scored ? pct(m.f1) : "—", "F1-score", "var(--brand-700)") +
       stat(m.tp, "TP", "var(--green)") +
       stat(m.fp, "FP", "var(--red)") +
       stat(m.fn, "FN", "var(--purple)") +
