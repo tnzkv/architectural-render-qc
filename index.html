@@ -110,7 +110,7 @@
 
   // Bump on every change. Shown in the header so a stale browser cache is obvious
   // at a glance instead of being mistaken for "the fix didn't work".
-  var APP_VERSION = "v34 · неперевірні області теж оцінюються";
+  var APP_VERSION = "v35 · загальний F1 на головній";
 
   if (window.pdfjsLib) {
     pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js";
@@ -1076,6 +1076,13 @@
              found:discs.length - uncertain, precision:precision, recall:recall, f1:f1 };
   }
 
+  // Overall score across every run: TP/FP/FN are pooled first and the score computed
+  // once (micro-average). Averaging per-run F1 instead would let a run with two
+  // findings weigh as much as one with thirty.
+  function overallMetrics() {
+    return calcMetrics(state.discrepancies.slice());
+  }
+
   // Metrics are shown as percentages everywhere — "0.83" reads as a number with no
   // scale, "83%" reads as a score. CSV keeps the raw 0..1 values for analysis.
   function pct(v) {
@@ -1839,10 +1846,35 @@
       '</div>'
     );
   }
+  function scoreColor(v) {
+    return v >= 0.75 ? "var(--green)" : v >= 0.5 ? "#b45309" : "var(--red)";
+  }
+  function OverallScoreHtml() {
+    var m = overallMetrics();
+    var rated = m.tp + m.fp + m.fn;
+    if (!rated) {
+      return '<div class="faint" style="font-size:11px; text-align:right; line-height:1.4;">' +
+             'Загальний F1<br>з\'явиться після першої оцінки ✅/❌</div>';
+    }
+    return (
+      '<a href="#/history" style="text-decoration:none; text-align:right; display:block;" ' +
+         'title="Micro-average по всіх перевірках: TP ' + m.tp + ', FP ' + m.fp + ', FN ' + m.fn + '">' +
+        '<div class="faint" style="font-size:11px;">Загальний F1</div>' +
+        '<div style="font-size:26px; font-weight:700; line-height:1.1; color:' + scoreColor(m.f1) + ';">' + pct(m.f1) + '</div>' +
+        '<div class="faint" style="font-size:11px;">P ' + pct(m.precision) + ' · R ' + pct(m.recall) +
+          ' · <span style="color:var(--green);">' + m.tp + '</span>/' +
+          '<span style="color:var(--red);">' + m.fp + '</span>/' +
+          '<span style="color:var(--purple);">' + m.fn + '</span></div>' +
+      '</a>'
+    );
+  }
   function MainPage() {
     return (
       '<div>' +
-        '<h1 style="margin-bottom:14px;">Render QC</h1>' +
+        '<div class="row" style="justify-content:space-between; align-items:flex-start; margin-bottom:14px; gap:12px;">' +
+          '<h1 style="margin:0;">Render QC</h1>' +
+          '<div id="overall-score"></div>' +
+        '</div>' +
         '<div class="mainlayout">' +
           '<div id="sidebar-container"></div>' +
           '<div id="history-container"></div>' +
@@ -2000,6 +2032,11 @@
       };
     }
 
+    function refreshOverall() {
+      var el = document.getElementById("overall-score");
+      if (el) el.innerHTML = OverallScoreHtml();
+    }
+
     function refreshHistory() {
       var wrap = document.getElementById("history-container");
       var runs = state.runs.filter(function (r) { return r.project_id === pid; })
@@ -2011,7 +2048,7 @@
             '<button class="btn btn-sm" id="seed-demo-btn">✨ Завантажити демо-дані</button>' +
           '</div>';
         var seedBtn = document.getElementById("seed-demo-btn");
-        if (seedBtn) seedBtn.onclick = function () { seedDemoData(pid); refreshSidebar(); refreshHistory(); };
+        if (seedBtn) seedBtn.onclick = function () { seedDemoData(pid); refreshSidebar(); refreshHistory(); refreshOverall(); };
         return;
       }
       var rowsHtml = runs.map(function (r) {
@@ -2046,6 +2083,7 @@
 
     refreshSidebar();
     refreshHistory();
+    refreshOverall();
   }
 
   // ---------- Review page ----------
