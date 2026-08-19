@@ -110,7 +110,7 @@
 
   // Bump on every change. Shown in the header so a stale browser cache is obvious
   // at a glance instead of being mistaken for "the fix didn't work".
-  var APP_VERSION = "v31 · виділення фасаду рамкою + код стилю (CL/CO/MH…)";
+  var APP_VERSION = "v32 · висока роздільність креслення + перевірка знахідок на збільшенні";
 
   if (window.pdfjsLib) {
     pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js";
@@ -518,7 +518,9 @@
   }
 
   // Crop a fraction of an image and scale the result to a target pixel size.
-  function cropAndResize(dataUrl, crop, outW, outH) {
+  // mime matters: JPEG ringing eats the 1-px lines a drawing is made of, so drawings
+  // go through as PNG and only photographic renders are compressed.
+  function cropAndResize(dataUrl, crop, outW, outH, mime) {
     return new Promise(function (resolve) {
       var img = new Image();
       img.onload = function () {
@@ -527,8 +529,11 @@
         if (sw < 8 || sh < 8) { resolve(null); return; }
         var c = document.createElement("canvas");
         c.width = outW; c.height = outH;
-        c.getContext("2d").drawImage(img, sx, sy, sw, sh, 0, 0, outW, outH);
-        resolve(c.toDataURL("image/jpeg", 0.95));
+        var ctx = c.getContext("2d");
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = "high";
+        ctx.drawImage(img, sx, sy, sw, sh, 0, 0, outW, outH);
+        resolve(mime === "image/png" ? c.toDataURL("image/png") : c.toDataURL("image/jpeg", 0.95));
       };
       img.onerror = function () { resolve(null); };
       img.src = dataUrl;
@@ -538,7 +543,7 @@
   // Prepares one image for the model: optionally crops to a region of interest, then
   // resizes to exactly the size Claude will see. Keeps the crop rectangle so pixel
   // coordinates coming back can be mapped onto the original full image.
-  async function buildImageBlocks(labelPrefix, asset, crop) {
+  async function buildImageBlocks(labelPrefix, asset, crop, mime) {
     var empty = { blocks: [], width: 0, height: 0, crop: { x: 0, y: 0, w: 1, h: 1 } };
     if (!asset || !asset.dataUrl) return empty;
     var size = await imageSizeOf(asset.dataUrl);
@@ -549,7 +554,7 @@
     var isFull = crop.x === 0 && crop.y === 0 && crop.w === 1 && crop.h === 1;
     var url;
     if (isFull && target[0] === size[0] && target[1] === size[1]) url = asset.dataUrl;
-    else url = await cropAndResize(asset.dataUrl, crop, target[0], target[1]);
+    else url = await cropAndResize(asset.dataUrl, crop, target[0], target[1], mime);
     var parsed = parseDataUrl(url || asset.dataUrl);
     if (!parsed) return empty;
     return {
@@ -664,6 +669,119 @@
     });
   }
 
+  // ── Zoomed second look ───────────────────────────────────────────────────────
+  // A wall light or a garage-door lite is a few pixels wide in a whole-elevation
+  // view, and that is exactly where the model miscounts ("one light on the drawing"
+  // when there are two). Each finding is re-examined on a crop around its own bbox,
+  // where the same detail is an order of magnitude bigger.
+
+  // Grow a bbox into a region worth looking at: centred, at least MIN of the image,
+  // clamped to the edges.
+  function zoomRegion(bbox, minFrac) {
+    if (!bbox) return null;
+    var min = minFrac || 0.16;
+    var w = Math.min(1, Math.max(bbox.w * 3.5, min));
+    var h = Math.min(1, Math.max(bbox.h * 3.5, min));
+    var cx = bbox.x + bbox.w / 2, cy = bbox.y + bbox.h / 2;
+    return {
+      x: Math.min(Math.max(0, cx - w / 2), 1 - w),
+      y: Math.min(Math.max(0, cy - h / 2), 1 - h),
+      w: w, h: h
+    };
+  }
+
+  var VERIFY_SCHEMA = {
+    type: "object",
+    properties: {
+      drawing_count: { type: "integer" },
+      render_count: { type: "integer" },
+      verdict: { type: "string", enum: ["confirmed", "corrected", "rejected"] },
+      explanation_uk: { type: "string" }
+    },
+    required: ["drawing_count", "render_count", "verdict", "explanation_uk"],
+    additionalProperties: false
+  };
+
+  async function verifyFindingZoomed(diff, drawingAsset, renderAsset, settings, mirrored) {
+    var dRegion = zoomRegion(diff.drawing_bbox), rRegion = zoomRegion(diff.render_bbox);
+    if (!dRegion && !rRegion) return null;
+    // Missing on one side means no bbox there; fall back to the mirrored-x position of
+    // the other one, which is where the element would be if it existed.
+    if (!dRegion) dRegion = mirrored ? { x: 1 - rRegion.x - rRegion.w, y: rRegion.y, w: rRegion.w, h: rRegion.h } : rRegion;
+    if (!rRegion) rRegion = mirrored ? { x: 1 - dRegion.x - dRegion.w, y: dRegion.y, w: dRegion.w, h: dRegion.h } : dRegion;
+
+    var d = await buildImageBlocks("ФРАГМЕНТ КРЕСЛЕННЯ (збільшено)", drawingAsset, dRegion, "image/png");
+    var r = await buildImageBlocks("ФРАГМЕНТ РЕНДЕРА (збільшено)", renderAsset, rRegion);
+    if (!d.blocks.length || !r.blocks.length) return null;
+
+    var question =
+      "Це збільшені фрагменти тієї самої ділянки фасаду: спершу креслення, потім рендер.\n\n" +
+      "Елемент: " + (diff.element_name || "") + "\n" +
+      "Заявлена відмінність: " + (diff.description || "") + "\n" +
+      (diff.drawing_evidence ? "Що нібито видно на кресленні: " + diff.drawing_evidence + "\n" : "") +
+      (diff.render_evidence ? "Що нібито видно на рендері: " + diff.render_evidence + "\n" : "") +
+      "\nПерерахуй і перевір ЗАНОВО, дивлячись тільки на ці збільшені фрагменти.\n" +
+      "· drawing_count — скільки таких елементів реально видно на фрагменті КРЕСЛЕННЯ (0, якщо жодного).\n" +
+      "· render_count — скільки на фрагменті РЕНДЕРА.\n" +
+      "Рахуй зліва направо, вголос у міркуваннях, і не покладайся на попередній висновок — він міг бути хибним.\n" +
+      (mirrored ? "· Рендер дзеркальний відносно креслення: ліво і право поміняні місцями. Дзеркальність — не помилка.\n" : "") +
+      "· На кресленні елементи намальовані тонкими лініями й умовними позначками, дуже дрібно — дивись уважно, " +
+      "світильник може виглядати як маленький трикутник, кружечок чи коротка риска біля отвору.\n\n" +
+      "verdict:\n" +
+      "· confirmed — відмінність справді є і описана правильно;\n" +
+      "· corrected — відмінність є, але кількість/деталь у описі неправильна (напиши правильну в explanation_uk);\n" +
+      "· rejected — відмінності немає, креслення і рендер тут збігаються (напиши в explanation_uk, що саме ти побачив).";
+
+    var body = {
+      model: settings.model || DEFAULT_MODEL,
+      max_tokens: 2000,
+      thinking: { type: "adaptive" },
+      output_config: { effort: "medium", format: { type: "json_schema", schema: VERIFY_SCHEMA } },
+      system: "Ти перевіряєш одну конкретну заявлену відмінність між кресленням фасаду і його рендером, " +
+              "дивлячись на збільшені фрагменти. Твоє завдання — не підтвердити попередній висновок, а " +
+              "чесно перерахувати те, що видно. Хибні тривоги коштують дорого: якщо елемент на кресленні " +
+              "насправді є — це rejected.",
+      messages: [{ role: "user", content: d.blocks.concat(r.blocks).concat([{ type: "text", text: question }]) }]
+    };
+    try {
+      var json = await callAnthropicMessages(body, settings);
+      var tb = (json.content || []).find(function (b) { return b.type === "text"; });
+      if (!tb) return null;
+      return JSON.parse(tb.text);
+    } catch (e) { return null; }
+  }
+
+  var VERIFY_MAX = 12, VERIFY_CONCURRENCY = 3;
+
+  async function verifyFindings(differences, drawingAsset, renderAsset, settings, mirrored, onProgress) {
+    var targets = differences.slice(0, VERIFY_MAX);
+    if (!targets.length) return;
+    var done = 0;
+    async function worker(queue) {
+      while (queue.length) {
+        var diff = queue.shift();
+        var v = await verifyFindingZoomed(diff, drawingAsset, renderAsset, settings, mirrored);
+        done++;
+        if (onProgress) onProgress("🔎 Перевіряю знахідки зблизька… " + done + "/" + targets.length);
+        if (!v) continue;
+        diff.verification = {
+          verdict: v.verdict,
+          drawing_count: v.drawing_count,
+          render_count: v.render_count,
+          note: v.explanation_uk
+        };
+        // A rejected finding is kept, not deleted — it is moved out of the main list
+        // so a wrong rejection still costs nothing but a second glance.
+        if (v.verdict === "rejected") diff.confidence = Math.min(diff.confidence, 0.3);
+        else if (v.verdict === "confirmed") diff.confidence = Math.max(diff.confidence, 0.75);
+      }
+    }
+    var queue = targets.slice();
+    var workers = [];
+    for (var i = 0; i < VERIFY_CONCURRENCY; i++) workers.push(worker(queue));
+    await Promise.all(workers);
+  }
+
   async function callAnthropicMessages(body, settings) {
     var res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
@@ -703,7 +821,7 @@
       if (onProgress) onProgress(elevationCrop ? "🤖 Аналізую (фасад збільшено)…" : "🤖 Аналізую…");
     }
 
-    var drawingImg = await buildImageBlocks("КРЕСЛЕННЯ", drawingAsset, elevationCrop);
+    var drawingImg = await buildImageBlocks("КРЕСЛЕННЯ", drawingAsset, elevationCrop, "image/png");
     var renderImg = await buildImageBlocks("РЕНДЕР", renderAsset);
     var drawingBlocks = drawingImg.blocks, renderBlocks = renderImg.blocks;
     if (elevationCrop || drawingAsset.userCropped) {
@@ -736,6 +854,11 @@
         "· drawing_bbox — у пікселях КРЕСЛЕННЯ, розмір " + drawingImg.width + "×" + drawingImg.height + " (x від 0 до " + drawingImg.width + ", y від 0 до " + drawingImg.height + ").\n" +
         "· render_bbox — у пікселях РЕНДЕРА, розмір " + renderImg.width + "×" + renderImg.height + " (x від 0 до " + renderImg.width + ", y від 0 до " + renderImg.height + ").\n" +
         "Не використовуй частки від 0 до 1 — тільки цілі піксельні значення в цих діапазонах. Рамка має щільно охоплювати сам елемент, а не порожнє місце аркуша.\n\n" +
+        "ПІДРАХУНОК. Перш ніж заявити різницю в кількості або відсутність елемента, перелічи у міркуваннях " +
+        "кожен екземпляр окремо — зліва направо, на кресленні й на рендері. На кресленні дрібні елементи " +
+        "(світильники, петлі, ручки, розкладка вікон) намальовані умовними позначками в кілька пікселів: " +
+        "маленький трикутник, кружечок, коротка риска. Не бачити позначку — не те саме, що її немає. " +
+        "Якщо ти не можеш упевнено порахувати щось на кресленні — це uncertain_areas, а не difference.\n\n" +
         "Порівняй елементи фасаду за інструкціями в системному промпті і поверни JSON." }
     ]);
     var body = {
@@ -751,7 +874,7 @@
     if (!textBlock) throw new Error("Порожня відповідь від AI.");
     var parsed = JSON.parse(textBlock.text);
     var summary = parsed.comparison_summary || {};
-    return {
+    var result = {
       summary: {
         mirror_detected: !!summary.mirror_detected,
         overall_result: summary.overall_result || "",
@@ -785,6 +908,14 @@
         };
       })
     };
+
+    // Second look at every finding, zoomed in on its own region. The regions are cut
+    // from the ORIGINAL assets, so this is real magnification, not an upscale of the
+    // overview the first pass already saw.
+    if (onProgress) onProgress("🔎 Перевіряю знахідки зблизька…");
+    await verifyFindings(result.differences, drawingAsset, renderAsset, settings,
+                         result.summary.mirror_detected, onProgress);
+    return result;
   }
 
   function openSettingsModal() {
@@ -1396,7 +1527,11 @@
     document.getElementById("pdf-prev").onclick = function () { showPage(currentPage - 1); };
     document.getElementById("pdf-next").onclick = function () { showPage(currentPage + 1); };
     document.getElementById("pdf-use").onclick = async function () {
-      var TARGET = 2400;
+      // A whole sheet at 2400 px left an elevation occupying a third of it with only
+      // ~800 px of real detail — a wall light was 8 px across and got miscounted.
+      // Export the sheet at the canvas-area limit instead, so the later crop to the
+      // elevation is a real zoom rather than an upscale of nothing.
+      var FULL_SHEET_TARGET = 8000, SELECTION_TARGET = 2600;
       var pageText = pageTexts[currentPage] || "";
       var label = file.name.replace(/\.pdf$/i, "") + " — стор. " + currentPage;
       var dataUrl;
@@ -1404,7 +1539,7 @@
       if (selection) {
         // Render the page big enough that the selected region alone comes out at
         // TARGET px wide, then cut exactly that region.
-        var full = await renderPdfPageToCanvas(pdfDoc, currentPage, Math.round(TARGET / selection.w));
+        var full = await renderPdfPageToCanvas(pdfDoc, currentPage, Math.round(SELECTION_TARGET / selection.w));
         var sx = Math.round(selection.x * full.width), sy = Math.round(selection.y * full.height);
         var sw = Math.round(selection.w * full.width), sh = Math.round(selection.h * full.height);
         var out = document.createElement("canvas");
@@ -1413,7 +1548,7 @@
         dataUrl = out.toDataURL("image/png");
         label += " (виділена ділянка)";
       } else {
-        var canvas = await renderPdfPageToCanvas(pdfDoc, currentPage, TARGET);
+        var canvas = await renderPdfPageToCanvas(pdfDoc, currentPage, FULL_SHEET_TARGET);
         dataUrl = canvas.toDataURL("image/png");
       }
 
@@ -1829,6 +1964,11 @@
             if (result.uncertain_areas.length > 0) {
               toast("AI позначив " + result.uncertain_areas.length + " област" + (result.uncertain_areas.length === 1 ? "ь" : "і") + " як неперевірні — вони показані окремо і не рахуються як помилки.");
             }
+            var rejected = findings.filter(function (f) { return f.verification && f.verification.verdict === "rejected"; }).length;
+            if (rejected > 0) {
+              toast("Перевірка на збільшенні не підтвердила " + rejected + " знахідк" + (rejected === 1 ? "у" : "и") +
+                    " — вони внизу списку пунктиром. Якщо помилка там таки є, позначайте ✅ як завжди.");
+            }
           } catch (err) {
             toast("Реальний AI недоступний (" + err.message + ") — використано мок-дані.");
             findings = runComparison(runId);
@@ -1913,11 +2053,33 @@
       '</div>'
     );
   }
+  // How the zoomed second pass ruled on a finding.
+  var VERDICT_STYLE = {
+    confirmed: { icon: "✔", label: "підтверджено на збільшенні", color: "#15803d", bg: "#f0fdf4" },
+    corrected: { icon: "✎", label: "уточнено на збільшенні", color: "#b45309", bg: "#fffbeb" },
+    rejected:  { icon: "✖", label: "не підтвердилось на збільшенні", color: "#b91c1c", bg: "#fef2f2" }
+  };
+  function VerificationLine(d) {
+    var v = d.verification;
+    if (!v || !VERDICT_STYLE[v.verdict]) return "";
+    var s = VERDICT_STYLE[v.verdict];
+    var counts = "";
+    if (typeof v.drawing_count === "number" && typeof v.render_count === "number") {
+      counts = ' <span class="faint">(креслення: ' + v.drawing_count + ', рендер: ' + v.render_count + ')</span>';
+    }
+    return '<div style="margin-top:6px; padding:6px 8px; border-radius:6px; background:' + s.bg +
+           '; color:' + s.color + '; font-size:11px; line-height:1.5;">' +
+           '<b>' + s.icon + ' ' + s.label + '</b>' + counts +
+           (v.note ? '<div style="color:var(--muted); margin-top:2px;">' + esc(v.note) + '</div>' : '') +
+           '</div>';
+  }
   function DiscCard(d, active) {
     var statusBadge = '<span class="badge" style="color:' + STATUS_COLOR[d.review_status] + '; background:' + STATUS_BG[d.review_status] + ';">' + STATUS_LABEL[d.review_status] + '</span>';
     var confOrManual = d.is_user_added ? "додано вручну" : ("Впевненість: " + Math.round(d.confidence * 100) + "%");
+    var rejected = d.verification && d.verification.verdict === "rejected";
     return (
-      '<div class="disc-card ' + (active ? "active" : "") + '" data-select-disc="' + d.id + '">' +
+      '<div class="disc-card ' + (active ? "active" : "") + '" data-select-disc="' + d.id + '"' +
+        (rejected ? ' style="opacity:.72; border-style:dashed;"' : '') + '>' +
         '<div class="disc-top">' +
           '<div><div class="disc-name">' + esc(d.element_name) + '</div><div class="disc-type">' + esc(ERROR_TYPE_LABEL[d.error_type] || d.error_type) + '</div></div>' +
           statusBadge +
@@ -1929,6 +2091,7 @@
               (d.render_evidence ? '<div><b>Рендер:</b> ' + esc(d.render_evidence) + '</div>' : '') +
             '</div>'
           : '') +
+        VerificationLine(d) +
         '<div class="disc-bottom">' +
           '<span class="faint" style="font-size:11px;">' + confOrManual + '</span>' +
           '<div class="row" style="gap:4px;" data-stop-select="1">' +
@@ -2023,6 +2186,12 @@
       return discrepanciesOf(runId).filter(function (d) {
         return (!reviewUi.filterType || d.element_type === reviewUi.filterType) &&
                (!reviewUi.filterStatus || d.review_status === reviewUi.filterStatus);
+      }).sort(function (a, b) {
+        // Findings the zoomed pass could not confirm sink to the bottom — they are
+        // kept (a wrong rejection would otherwise hide a real error) but out of the way.
+        var ra = a.verification && a.verification.verdict === "rejected" ? 1 : 0;
+        var rb = b.verification && b.verification.verdict === "rejected" ? 1 : 0;
+        return ra - rb;
       });
     }
 
