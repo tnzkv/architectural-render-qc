@@ -110,7 +110,7 @@
 
   // Bump on every change. Shown in the header so a stale browser cache is obvious
   // at a glance instead of being mistaken for "the fix didn't work".
-  var APP_VERSION = "v38 · Precision / Recall";
+  var APP_VERSION = "v39 · режим NDA";
 
   if (window.pdfjsLib) {
     pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js";
@@ -207,10 +207,14 @@
   function loadSettings() {
     try {
       var raw = localStorage.getItem(SETTINGS_KEY);
-      if (!raw) return { anthropicApiKey: "", model: DEFAULT_MODEL };
+      if (!raw) return { anthropicApiKey: "", model: DEFAULT_MODEL, ndaMode: false };
       var parsed = JSON.parse(raw);
-      return { anthropicApiKey: parsed.anthropicApiKey || "", model: parsed.model || DEFAULT_MODEL };
-    } catch (e) { return { anthropicApiKey: "", model: DEFAULT_MODEL }; }
+      return {
+        anthropicApiKey: parsed.anthropicApiKey || "",
+        model: parsed.model || DEFAULT_MODEL,
+        ndaMode: !!parsed.ndaMode
+      };
+    } catch (e) { return { anthropicApiKey: "", model: DEFAULT_MODEL, ndaMode: false }; }
   }
   function saveSettings(s) {
     try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); return true; }
@@ -222,7 +226,7 @@
     if (!badge) return;
     var s = loadSettings();
     if (s.anthropicApiKey) {
-      badge.textContent = "🤖 Реальний AI · " + s.model;
+      badge.textContent = "🤖 Реальний AI · " + s.model + (s.ndaMode ? " · 🔒 NDA" : "");
       badge.style.color = "var(--green)";
     } else {
       badge.textContent = "🎲 Мок-режим · ключ не додано";
@@ -835,8 +839,11 @@
         "». Якщо на цьому фрагменті видно підпис іншого стилю — так і зазнач в uncertain_areas, бо тоді " +
         "порівнюються різні будинки. «FARMHOUSE» і «MODERN FARMHOUSE» — різні стилі.)" }]);
     }
+    // The PDF text layer is the whole sheet's text, title block included — project
+    // name, client, address, builder. Under an NDA that is the identifying part, so
+    // it can be withheld even when the elevation image itself is fine to send.
     var textLayerBlocks = [];
-    if (drawingAsset.pdfText && drawingAsset.pdfText.length > 20) {
+    if (!settings.ndaMode && drawingAsset.pdfText && drawingAsset.pdfText.length > 20) {
       textLayerBlocks.push({
         type: "text",
         text: "ТЕКСТОВИЙ ШАР КРЕСЛЕННЯ (витягнутий напряму з PDF, НЕ розпізнаний із картинки — це " +
@@ -929,6 +936,17 @@
           '<div class="field"><label>Anthropic API-ключ</label><input type="password" id="s-key" placeholder="sk-ant-..." value="' + esc(s.anthropicApiKey) + '"></div>' +
           '<div class="field"><label>Модель</label><input type="text" id="s-model" value="' + esc(s.model) + '"></div>' +
           '<p class="faint" style="font-size:11px; margin:-6px 0 14px;">Без ключа застосунок працює на мок-даних. З ключем — реальний виклик Claude Vision (тільки для завантажених JPG/PNG, не для демо-SVG). Отримати ключ: console.anthropic.com/settings/keys</p>' +
+          '<div style="border-top:1px solid var(--border); padding-top:12px; margin-bottom:14px;">' +
+            '<label style="display:flex; gap:8px; align-items:flex-start; cursor:pointer;">' +
+              '<input type="checkbox" id="s-nda" style="margin-top:2px;"' + (s.ndaMode ? ' checked' : '') + '>' +
+              '<span><b style="font-size:13px;">Режим NDA — не надсилати текстовий шар PDF</b>' +
+              '<div class="faint" style="font-size:11px; line-height:1.5; margin-top:3px;">' +
+                'Текстовий шар — це весь текст аркуша разом зі штампом: назва проєкту, забудовник, адреса. ' +
+                'З увімкненим режимом в API йдуть лише зображення. Точність трохи впаде — модель більше не зможе ' +
+                'звірятися з підписами матеріалів і типів. Виділяйте фасад рамкою (✂️), щоб і на картинку штамп не потрапляв.' +
+              '</div></span>' +
+            '</label>' +
+          '</div>' +
           '<div class="row" style="justify-content:space-between;">' +
             '<button class="btn" id="s-clear" style="border-color:#fecaca; color:var(--red);">Видалити ключ</button>' +
             '<div class="row">' +
@@ -941,7 +959,8 @@
     document.getElementById("s-cancel").onclick = function () { root.innerHTML = ""; };
     document.getElementById("settings-backdrop").onclick = function (e) { if (e.target.id === "settings-backdrop") root.innerHTML = ""; };
     document.getElementById("s-clear").onclick = function () {
-      var ok = saveSettings({ anthropicApiKey: "", model: DEFAULT_MODEL });
+      // Clearing the key must not silently turn the NDA guard back off.
+      var ok = saveSettings({ anthropicApiKey: "", model: DEFAULT_MODEL, ndaMode: document.getElementById("s-nda").checked });
       if (!ok) { toast("Не вдалося очистити налаштування — localStorage недоступний у цьому вікні."); return; }
       root.innerHTML = "";
       updateAiBadge();
@@ -950,15 +969,17 @@
     document.getElementById("s-save").onclick = function () {
       var key = document.getElementById("s-key").value.trim();
       var model = document.getElementById("s-model").value.trim() || DEFAULT_MODEL;
+      var nda = document.getElementById("s-nda").checked;
       if (!key) { toast("Введіть ключ або натисніть «Видалити ключ», щоб лишитись на моку."); return; }
-      var ok = saveSettings({ anthropicApiKey: key, model: model });
+      var ok = saveSettings({ anthropicApiKey: key, model: model, ndaMode: nda });
       if (!ok) {
         toast("Не вдалося зберегти — localStorage недоступний у цьому вікні перегляду. Відкрийте index.html напряму у звичайній вкладці браузера (не у вбудованій панелі прев'ю).");
         return;
       }
       root.innerHTML = "";
       updateAiBadge();
-      toast("Ключ збережено. Реальний AI активовано.");
+      toast(nda ? "Збережено. Режим NDA увімкнено — текстовий шар PDF більше не надсилається."
+                : "Ключ збережено. Реальний AI активовано.");
     };
   }
 
@@ -1987,6 +2008,11 @@
         var findings;
         var s = loadSettings();
         if (s.anthropicApiKey) {
+          // In NDA mode the text layer is withheld, but a full sheet still carries the
+          // title block as pixels. Say so before the request, not after.
+          if (s.ndaMode && !drawingAsset.userCropped) {
+            toast("Режим NDA: текстовий шар не піде, але аркуш надсилається цілком — штамп із назвою проєкту видно на зображенні. Виділіть фасад рамкою (✂️), щоб цього уникнути.");
+          }
           runBtn.disabled = true;
           runBtn.textContent = "🤖 Аналізуємо через Claude Vision…";
           try {
