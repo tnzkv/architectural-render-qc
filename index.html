@@ -110,7 +110,7 @@
 
   // Bump on every change. Shown in the header so a stale browser cache is obvious
   // at a glance instead of being mistaken for "the fix didn't work".
-  var APP_VERSION = "v39 · режим NDA";
+  var APP_VERSION = "v40 · захист історії від втрати";
 
   if (window.pdfjsLib) {
     pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js";
@@ -1027,20 +1027,88 @@
   function freshState() {
     return { projects: [], assets: [], runs: [], discrepancies: [], seq: { project:0, asset:0, run:0, discrepancy:0 } };
   }
-  function loadState() {
+  // A state that cannot be read is not the same as no state. Returning freshState()
+  // here used to be fatal: the very next saveState() overwrote the unreadable value,
+  // destroying history that might still have been recoverable. Quarantine it instead.
+  function quarantineRawState(raw, why) {
     try {
-      var raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return freshState();
+      localStorage.setItem(STORAGE_KEY + "_broken_" + Date.now(), raw);
+    } catch (e) { /* nothing more we can do — the copy in IndexedDB is the fallback */ }
+    stateLoadProblem = why;
+  }
+  var stateLoadProblem = null;
+
+  function loadState() {
+    var raw = null;
+    try { raw = localStorage.getItem(STORAGE_KEY); }
+    catch (e) { stateLoadProblem = "localStorage недоступний: " + e.message; return freshState(); }
+    if (!raw) return freshState();
+    try {
       var parsed = JSON.parse(raw);
-      if (!parsed.seq) return freshState();
+      if (!parsed.seq) { quarantineRawState(raw, "збережений стан не має поля seq"); return freshState(); }
       parsed.assets = parsed.assets || [];
       // Migrate anything still embedded from before IndexedDB storage existed.
       parsed.assets.forEach(function (a) {
         if (a.dataUrl || a.pdfText) idbPutBlob(a.id, a.dataUrl, a.pdfText).catch(function () {});
       });
       return parsed;
-    } catch (e) { return freshState(); }
+    } catch (e) {
+      quarantineRawState(raw, "стан пошкоджено: " + e.message);
+      return freshState();
+    }
   }
+
+  // Second copy of the history, in a different storage system. localStorage and
+  // IndexedDB do not fail together for the same reasons, so whichever survives can
+  // rebuild the other. Written on every save; read only when localStorage came back empty.
+  var STATE_MIRROR_ID = "__state_mirror__";
+  function mirrorState(slimJson) {
+    idbPutBlob(STATE_MIRROR_ID, slimJson, "").catch(function () {});
+  }
+  function restoreStateFromMirrorIfEmpty() {
+    if (state.runs.length || stateLoadProblem) return;      // nothing lost, or already flagged
+    openIdb().then(function (db) {
+      return new Promise(function (resolve) {
+        var tx = db.transaction(IDB_STORE, "readonly");
+        var req = tx.objectStore(IDB_STORE).get(STATE_MIRROR_ID);
+        req.onsuccess = function () { resolve(req.result); };
+        req.onerror = function () { resolve(null); };
+      });
+    }).then(function (rec) {
+      if (!rec || !rec.dataUrl) return;
+      var parsed;
+      try { parsed = JSON.parse(rec.dataUrl); } catch (e) { return; }
+      if (!parsed.seq || !(parsed.runs || []).length) return;
+      state = parsed;
+      state.assets = state.assets || [];
+      saveState();
+      hydrateAssetBlobs();
+      render();
+      toast("Історію відновлено з резервної копії у IndexedDB — " + state.runs.length + " перевірок.");
+    }).catch(function () {});
+  }
+
+  // Keep review-page images sharp enough to inspect, small enough to store.
+  var STORED_MAX_EDGE = 2600;
+  function shrinkStoredAssets(assets) {
+    assets.forEach(function (a) {
+      if (!a || !a.dataUrl || a.shrunk) return;
+      imageSizeOf(a.dataUrl).then(function (size) {
+        if (!size) return;
+        var long = Math.max(size[0], size[1]);
+        if (long <= STORED_MAX_EDGE) { a.shrunk = true; return; }
+        var k = STORED_MAX_EDGE / long;
+        return resizeDataUrlTo(a.dataUrl, Math.round(size[0] * k), Math.round(size[1] * k))
+          .then(function (small) {
+            if (!small) return;
+            a.dataUrl = small;
+            a.shrunk = true;
+            return idbPutBlob(a.id, small, a.pdfText || "");
+          });
+      }).catch(function () {});
+    });
+  }
+
   function hydrateAssetBlobs() {
     idbGetAllBlobs().then(function (rows) {
       var byId = {};
@@ -1062,8 +1130,10 @@
       return { id: a.id, project_id: a.project_id, kind: a.kind, name: a.name };
     });
     var slim = { projects: state.projects, assets: slimAssets, runs: state.runs, discrepancies: state.discrepancies, seq: state.seq };
+    var json = JSON.stringify(slim);
+    mirrorState(json);
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(slim));
+      localStorage.setItem(STORAGE_KEY, json);
       return true;
     } catch (e) {
       toast("⚠️ Історію перевірок не вдалося зберегти (сховище переповнене). Видаліть старі перевірки або очистіть дані сайту.");
@@ -1166,6 +1236,11 @@
   window.addEventListener("DOMContentLoaded", function () {
     updateAiBadge();
     requestPersistentStorage();
+    restoreStateFromMirrorIfEmpty();
+    if (stateLoadProblem) {
+      toast("⚠️ Збережену історію не вдалося прочитати (" + stateLoadProblem + "). Її НЕ перезаписано — " +
+            "копію відкладено окремим ключем. Відкрийте diagnostics.html, перш ніж працювати далі.");
+    }
     var ver = document.getElementById("app-version");
     if (ver) ver.textContent = APP_VERSION;
     document.getElementById("settings-btn").onclick = openSettingsModal;
@@ -2065,6 +2140,14 @@
           state.discrepancies.push(uncertainToDiscrepancy(u, runId));
         });
         saveState();
+        // Full resolution is needed only while the model is looking. Once the run is
+        // scored, the images are just something to look at, so shrink what we keep —
+        // a 40 MP sheet at 8 MB per run is what filled the browser's storage budget.
+        shrinkStoredAssets([drawingAsset, renderAsset]);
+        if (state.runs.length % 5 === 0) {
+          toast("Уже " + state.runs.length + " перевірок. Зробіть резервну копію: Історія → «⬇ Резервна копія». " +
+                "Браузерне сховище не є надійним місцем для єдиної копії.");
+        }
         navigate("/run/" + runId);
       };
     }

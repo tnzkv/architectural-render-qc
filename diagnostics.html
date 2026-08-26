@@ -102,10 +102,28 @@ function checkIdb() {
         var tx = db.transaction(IDB_STORE, "readonly");
         var g = tx.objectStore(IDB_STORE).getAll();
         g.onsuccess = function () {
-          var rows = g.result || [], bytes = 0;
-          rows.forEach(function (r) { bytes += (r.dataUrl || "").length + (r.pdfText || "").length; });
+          var rows = g.result || [], bytes = 0, mirror = null;
+          rows.forEach(function (r) {
+            bytes += (r.dataUrl || "").length + (r.pdfText || "").length;
+            if (r.id === "__state_mirror__") mirror = r;
+          });
           box(rows.length ? "ok" : "warn", "3. Зображення (IndexedDB)",
-            '<div class="big">' + rows.length + ' файлів · ' + (bytes / 1048576).toFixed(1) + ' МБ</div>');
+            '<div class="big">' + rows.length + ' записів · ' + (bytes / 1048576).toFixed(1) + ' МБ</div>');
+
+          // The v40 mirror: a second copy of the history in a different storage system.
+          var mBody;
+          if (!mirror) {
+            mBody = '<p>Дзеркальної копії ще немає. Вона з\'явиться після першого збереження у версії v40+.</p>';
+          } else {
+            var mp = null;
+            try { mp = JSON.parse(mirror.dataUrl); } catch (e) {}
+            mBody = mp
+              ? '<div class="big">' + ((mp.runs || []).length) + ' перевірок · ' +
+                ((mp.discrepancies || []).length) + ' знахідок</div>' +
+                ((mp.runs || []).length ? '<p><b>Історію можна відновити з цієї копії.</b></p>' : '')
+              : '<p>Копія є, але не читається.</p>';
+          }
+          box(mirror ? "ok" : "warn", "3b. Дзеркальна копія історії (IndexedDB)", mBody);
           db.close(); resolve();
         };
         g.onerror = function () { box("bad", "3. Зображення (IndexedDB)", "Помилка читання."); db.close(); resolve(); };
