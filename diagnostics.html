@@ -1,0 +1,166 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Render QC — діагностика сховища</title>
+<style>
+  body { font-family: -apple-system, "Segoe UI", sans-serif; max-width: 760px; margin: 24px auto; padding: 0 16px; color: #0f172a; }
+  h1 { font-size: 19px; margin: 0 0 4px; }
+  .sub { color: #64748b; font-size: 13px; margin: 0 0 18px; }
+  .box { border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px 14px; margin-bottom: 10px; }
+  .ok { border-color: #86efac; background: #f0fdf4; }
+  .bad { border-color: #fecaca; background: #fef2f2; }
+  .warn { border-color: #fde68a; background: #fffbeb; }
+  h2 { font-size: 13px; margin: 0 0 6px; text-transform: uppercase; letter-spacing: .04em; color: #475569; }
+  pre { background: #f8fafc; border-radius: 6px; padding: 8px; font-size: 11px; overflow-x: auto; margin: 6px 0 0; }
+  button { font: inherit; padding: 8px 14px; border-radius: 6px; border: 1px solid #cbd5e1; background: #fff; cursor: pointer; }
+  button.primary { background: #2f57c9; border-color: #2f57c9; color: #fff; }
+  .big { font-size: 22px; font-weight: 700; }
+</style>
+<h1>Діагностика сховища Render QC</h1>
+<p class="sub">Ця сторінка <b>тільки читає</b> — вона нічого не записує, не видаляє і не створює.
+Відкрийте її в тому самому браузері, де працює додаток.</p>
+<div id="out">Читаю…</div>
+
+<script>
+var STORAGE_KEY = "renderqc_state_v1";
+var SETTINGS_KEY = "renderqc_settings_v1";
+var IDB_NAME = "renderqc_db_v1";
+var IDB_STORE = "asset_blobs";
+var out = document.getElementById("out");
+var parts = [];
+var rawState = null;
+
+function esc(s) { return String(s).replace(/[&<>"]/g, function (c) {
+  return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+function box(cls, title, body) { parts.push('<div class="box ' + cls + '"><h2>' + title + '</h2>' + body + '</div>'); }
+function paint() { out.innerHTML = parts.join(""); wire(); }
+
+// 1. localStorage — the run history and all TP/FP/FN live here
+try {
+  rawState = localStorage.getItem(STORAGE_KEY);
+} catch (e) {
+  box("bad", "1. localStorage", "Недоступний у цьому вікні: " + esc(e.message));
+}
+if (rawState === null) {
+  box("bad", "1. Історія перевірок (localStorage)",
+    '<div class="big">Ключа немає</div><p>Запис <code>' + STORAGE_KEY +
+    '</code> у цьому браузері відсутній. Це означає, що дані стерті або ви у іншому браузері / профілі / вікні інкогніто.</p>');
+} else {
+  var parsed = null, err = null;
+  try { parsed = JSON.parse(rawState); } catch (e) { err = e.message; }
+  if (err) {
+    box("warn", "1. Історія перевірок (localStorage)",
+      '<div class="big">Дані є, але пошкоджені</div><p>Розмір: ' + rawState.length +
+      ' символів. Помилка розбору: ' + esc(err) + '</p><p><b>Не запускайте додаток</b> — збережіть копію кнопкою внизу.</p>');
+  } else {
+    var runs = (parsed.runs || []).length, discs = (parsed.discrepancies || []).length;
+    var tp = 0, fp = 0, fn = 0;
+    (parsed.discrepancies || []).forEach(function (d) {
+      if (d.review_status === "tp") tp++;
+      else if (d.review_status === "fp") fp++;
+      else if (d.review_status === "fn") fn++;
+    });
+    box(runs ? "ok" : "warn", "1. Історія перевірок (localStorage)",
+      '<div class="big">' + runs + ' перевірок · ' + discs + ' знахідок</div>' +
+      '<p>Оцінено вами: TP ' + tp + ' · FP ' + fp + ' · FN ' + fn + '<br>' +
+      'Розмір запису: ' + (rawState.length / 1024).toFixed(1) + ' КБ</p>' +
+      (runs ? '<p><b>Дані на місці.</b> Збережіть копію кнопкою внизу, перш ніж щось робити.</p>'
+            : '<p>Запис існує, але порожній — історію справді стерто.</p>'));
+  }
+}
+
+// 2. every other key, in case something was written under a different name
+try {
+  var keys = [];
+  for (var i = 0; i < localStorage.length; i++) {
+    var k = localStorage.key(i);
+    keys.push(k + "  (" + ((localStorage.getItem(k) || "").length) + " симв.)");
+  }
+  box(keys.length ? "" : "warn", "2. Усі ключі localStorage цього походження",
+    keys.length ? "<pre>" + esc(keys.join("\n")) + "</pre>"
+                : "<p>Порожньо. Сховище цього походження очищене повністю — разом із налаштуваннями й API-ключем.</p>");
+} catch (e) { box("bad", "2. Усі ключі localStorage", esc(e.message)); }
+
+// 3. IndexedDB — images. Enumerate first so we never create the DB by opening it.
+function checkIdb() {
+  if (!window.indexedDB) { box("bad", "3. Зображення (IndexedDB)", "IndexedDB недоступний."); return Promise.resolve(); }
+  var list = indexedDB.databases ? indexedDB.databases() : Promise.resolve(null);
+  return list.then(function (dbs) {
+    if (dbs && !dbs.some(function (d) { return d.name === IDB_NAME; })) {
+      box("bad", "3. Зображення (IndexedDB)",
+        '<div class="big">Базу видалено</div><p>База <code>' + IDB_NAME + '</code> у цьому браузері відсутня.</p>');
+      return;
+    }
+    return new Promise(function (resolve) {
+      var req = indexedDB.open(IDB_NAME);           // no version — never upgrades
+      req.onerror = function () { box("bad", "3. Зображення (IndexedDB)", "Не вдалося відкрити."); resolve(); };
+      req.onsuccess = function () {
+        var db = req.result;
+        if (!db.objectStoreNames.contains(IDB_STORE)) {
+          box("bad", "3. Зображення (IndexedDB)", "Сховище <code>" + IDB_STORE + "</code> відсутнє.");
+          db.close(); resolve(); return;
+        }
+        var tx = db.transaction(IDB_STORE, "readonly");
+        var g = tx.objectStore(IDB_STORE).getAll();
+        g.onsuccess = function () {
+          var rows = g.result || [], bytes = 0;
+          rows.forEach(function (r) { bytes += (r.dataUrl || "").length + (r.pdfText || "").length; });
+          box(rows.length ? "ok" : "warn", "3. Зображення (IndexedDB)",
+            '<div class="big">' + rows.length + ' файлів · ' + (bytes / 1048576).toFixed(1) + ' МБ</div>');
+          db.close(); resolve();
+        };
+        g.onerror = function () { box("bad", "3. Зображення (IndexedDB)", "Помилка читання."); db.close(); resolve(); };
+      };
+    });
+  }).catch(function (e) { box("bad", "3. Зображення (IndexedDB)", esc(e.message)); });
+}
+
+// 4. quota and eviction mode — the likely reason data vanished
+function checkQuota() {
+  if (!navigator.storage || !navigator.storage.estimate) { box("", "4. Квота", "Браузер не повідомляє."); return Promise.resolve(); }
+  return navigator.storage.estimate().then(function (est) {
+    return (navigator.storage.persisted ? navigator.storage.persisted() : Promise.resolve(false))
+      .then(function (p) {
+        box(p ? "ok" : "warn", "4. Режим сховища",
+          '<p>Використано ' + ((est.usage || 0) / 1048576).toFixed(1) + ' МБ з ' +
+          ((est.quota || 0) / 1048576).toFixed(0) + ' МБ</p>' +
+          (p ? '<p><b>Постійне</b> — браузер не витісняє ці дані автоматично.</p>'
+             : '<p><b>⚠️ Тимчасове (best-effort).</b> Браузер має право стерти сховище цього походження ' +
+               'повністю — разом із історією перевірок — коли на диску бракує місця. Для сторінок, ' +
+               'відкритих як <code>file://</code>, Chrome постійний режим не видає.</p>'));
+      });
+  }).catch(function () { box("", "4. Квота", "Не вдалося прочитати."); });
+}
+
+// Paint what we already know before the async checks run, and again when they
+// finish — a hung storage API must never leave the page stuck on "Читаю…".
+paint();
+var finished = false;
+setTimeout(function () { if (!finished) { finish("(перевірка IndexedDB/квоти не відповіла — решта даних вище актуальна)"); } }, 4000);
+
+function wire() {
+  var b = document.getElementById("dl");
+  if (b) b.onclick = function () {
+    var blob = new Blob([rawState], { type: "application/json" });
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "renderqc-rescue-" + new Date().toISOString().slice(0, 10) + ".json";
+    document.body.appendChild(a); a.click(); a.remove();
+  };
+}
+
+function finish(note) {
+  if (finished) return;
+  finished = true;
+  if (note) box("", "Примітка", esc(note));
+  parts.push('<div class="box"><h2>Що робити далі</h2>' +
+    (rawState
+      ? '<p>Дані ще в браузері. <b>Спершу збережіть копію</b>, і тільки потім відкривайте додаток.</p>' +
+        '<p><button class="primary" id="dl">⬇ Зберегти копію даних у файл</button></p>'
+      : '<p>У цьому браузері даних немає. Перевірте: чи це той самий браузер і профіль, ' +
+        'чи не відкрито вікно в режимі інкогніто, чи не запускали ви «Очистити дані перегляду».</p>') +
+    '<p style="color:#64748b; font-size:12px;">Версія сторінки: read-only, нічого не записує.</p></div>');
+  paint();
+}
+
+checkIdb().then(checkQuota).then(function () { finish(); }).catch(function () { finish(); });
+</script>
