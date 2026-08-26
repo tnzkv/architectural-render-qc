@@ -71,6 +71,9 @@
   .iconbtn.on-tp { background:var(--green); color:#fff; border-color:var(--green); }
   .iconbtn.on-fp { background:var(--red); color:#fff; border-color:var(--red); }
   .modal-backdrop { position:fixed; inset:0; background:rgba(15,23,42,.45); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px; }
+  /* Framing an elevation on a big sheet needs room, so the PDF picker fills the window. */
+  .modal-wide { max-width:none; width:calc(100vw - 32px); height:calc(100vh - 32px); display:flex; flex-direction:column; }
+  .modal-wide #pdf-canvas-wrap { flex:1; max-height:none; }
   .modal { background:#fff; border-radius:12px; padding:20px; max-width:420px; width:100%; box-shadow:0 20px 40px rgba(0,0,0,.15); }
   .field { margin-bottom:12px; }
   .field label { display:block; font-size:12px; color:var(--muted); margin-bottom:4px; }
@@ -110,7 +113,7 @@
 
   // Bump on every change. Shown in the header so a stale browser cache is obvious
   // at a glance instead of being mistaken for "the fix didn't work".
-  var APP_VERSION = "v40 · захист історії від втрати";
+  var APP_VERSION = "v41 · навчання з ваших FN + більше вікно вибору фасаду";
 
   if (window.pdfjsLib) {
     pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js";
@@ -854,7 +857,12 @@
               "шар:\n\n" + drawingAsset.pdfText.slice(0, 6000)
       });
     }
-    var content = drawingBlocks.concat(textLayerBlocks).concat(renderBlocks).concat([
+    // What this reviewer has repeatedly caught the model missing, fed back as focus.
+    var focusBlocks = [];
+    var focus = missedFocusText();
+    if (focus) focusBlocks.push({ type: "text", text: focus });
+
+    var content = drawingBlocks.concat(textLayerBlocks).concat(renderBlocks).concat(focusBlocks).concat([
       { type: "text", text:
         "Вище — креслення і рендер одного й того ж фасаду. Аркуш креслення може містити рамку, штамп і порожні поля — це не частина будинку.\n\n" +
         "КООРДИНАТИ. Усі bounding box давай у ПІКСЕЛЯХ як x1, y1 (лівий верхній кут) і x2, y2 (правий нижній кут), початок координат — лівий верхній кут зображення.\n" +
@@ -1167,6 +1175,101 @@
              found:discs.length - uncertain, precision:precision, recall:recall, f1:f1 };
   }
 
+  // ── Learning from what the reviewer marked as missed ─────────────────────────
+  // The model itself never learns: every API call is independent and nothing is
+  // trained on. But the ➕ entries are a record of what it reliably fails to notice,
+  // and that record can be fed back as a targeted instruction on the next run.
+
+  var MISSED_MIN_TOTAL = 3;     // below this the sample says nothing
+  var MISSED_MAX_CATEGORIES = 5;
+  var MISSED_MAX_EXAMPLES = 2;
+
+  function missedCategoryStats() {
+    var byType = {};
+    state.discrepancies.forEach(function (d) {
+      var t = d.element_type;
+      if (!t) return;
+      var s = byType[t] || (byType[t] = { type: t, tp: 0, fn: 0, examples: [] });
+      if (d.review_status === "tp") s.tp++;
+      else if (d.review_status === "fn") {
+        s.fn++;
+        // Newest first: the most recent wording is the most relevant phrasing.
+        // A two-word note teaches the model nothing — only quote real descriptions.
+        if (d.description && d.description.trim().length >= 15) s.examples.unshift(d.description.trim());
+      }
+    });
+    return Object.keys(byType).map(function (k) {
+      var s = byType[k];
+      s.total = s.tp + s.fn;
+      s.recall = s.total ? s.tp / s.total : 0;
+      s.examples = s.examples.slice(0, MISSED_MAX_EXAMPLES);
+      return s;
+    }).filter(function (s) { return s.fn > 0; })
+      .sort(function (a, b) { return b.fn - a.fn || a.recall - b.recall; });
+  }
+
+  function totalMissed() {
+    return state.discrepancies.filter(function (d) { return d.review_status === "fn"; }).length;
+  }
+
+  // The prompt block. Returns null while there is not enough review data to be
+  // anything but noise — an early wrong hint would cost more than it gains.
+  function missedFocusText() {
+    if (totalMissed() < MISSED_MIN_TOTAL) return null;
+    var stats = missedCategoryStats().slice(0, MISSED_MAX_CATEGORIES);
+    if (!stats.length) return null;
+    var lines = stats.map(function (s) {
+      var line = "· " + s.type.replace(/_/g, " ") + " — пропущено " + s.fn + " з " + s.total +
+                 " (знайдено лише " + Math.round(s.recall * 100) + "%)";
+      if (s.examples.length) {
+        line += "\n  Що саме було пропущено раніше: " +
+                s.examples.map(function (e) { return "«" + e.replace(/\s+/g, " ").slice(0, 180) + "»"; }).join("; ");
+      }
+      return line;
+    });
+    return "ТВОЇ СЛАБКІ МІСЦЯ НА ЦИХ КРЕСЛЕННЯХ.\n" +
+      "Рецензент-людина перевірив попередні знахідки й позначив, що ти пропустив. " +
+      "Найгірше в тебе з цими категоріями:\n" + lines.join("\n") + "\n" +
+      "Пройди ці категорії окремим проходом, елемент за елементом, перш ніж формувати відповідь. " +
+      "Це НЕ означає, що помилка там обов'язково є — це означає, що саме там ти історично був " +
+      "неуважним, тож звичайного погляду недостатньо. Якщо після уважної перевірки розбіжності " +
+      "немає — так і залиш, вигадувати не треба.";
+  }
+
+  // Shows the reviewer exactly what the app is now telling the model on her behalf.
+  function MissedFocusPanel() {
+    var missed = totalMissed();
+    if (!missed) return "";
+    var focus = missedFocusText();
+    var active = focus !== null;
+    var stats = missedCategoryStats().slice(0, MISSED_MAX_CATEGORIES);
+    var rows = stats.map(function (s) {
+      var bad = s.recall < 0.5;
+      return '<li style="margin-bottom:4px;"><b>' + esc(s.type.replace(/_/g, " ")) + '</b> — ' +
+        'пропущено <span style="color:var(--purple);">' + s.fn + '</span> з ' + s.total +
+        ', знайдено <span style="color:' + (bad ? "var(--red)" : "var(--muted)") + ';">' +
+        Math.round(s.recall * 100) + '%</span></li>';
+    }).join("");
+    return (
+      // The tooltip carries the exact text the model receives — no guessing what the
+      // app says on your behalf.
+      '<div class="card" style="margin-bottom:14px;"' +
+        (active ? ' title="' + esc(focus) + '"' : '') + '>' +
+        '<div style="font-size:13px; font-weight:600; margin-bottom:4px;">Чого модель найчастіше не помічає' +
+          (active ? ' <span class="faint" style="font-weight:400; font-size:11px;">— наведіть, щоб побачити точний текст інструкції</span>' : '') +
+        '</div>' +
+        '<p class="muted" style="font-size:12px; margin:0 0 8px;">' +
+          (active
+            ? 'Цей список автоматично додається до запиту як окрема інструкція — модель отримує його ' +
+              'на кожній наступній перевірці разом із прикладами ваших формулювань.'
+            : 'Потрібно щонайменше ' + MISSED_MIN_TOTAL + ' позначки ➕, щоб список почав ' +
+              'передаватись моделі. Зараз їх ' + missed + '.') +
+        '</p>' +
+        '<ul style="margin:0; padding-left:18px; font-size:12px; line-height:1.6;">' + rows + '</ul>' +
+      '</div>'
+    );
+  }
+
   // Overall score across every run: TP/FP/FN are pooled first and the score computed
   // once (micro-average). Averaging per-run F1 instead would let a run with two
   // findings weigh as much as one with thirty.
@@ -1367,7 +1470,7 @@
     var root = document.getElementById("global-modal-root");
     root.innerHTML =
       '<div class="modal-backdrop" id="pdf-backdrop">' +
-        '<div class="modal" style="max-width:900px;">' +
+        '<div class="modal modal-wide">' +
           '<h3 style="margin:0 0 2px;">📄 Оберіть сторінку з елевацією</h3>' +
           '<p class="muted" id="pdf-status" style="margin:0 0 8px;">Завантаження PDF…</p>' +
           '<div class="row" style="gap:6px; margin-bottom:8px;">' +
@@ -1383,7 +1486,7 @@
             '<button class="btn btn-sm" id="pdf-select-btn">✂️ Виділити фасад</button>' +
             '<span class="faint" id="pdf-select-hint" style="font-size:11px;">— на аркуші кілька фасадів? виділіть потрібний рамкою</span>' +
           '</div>' +
-          '<div id="pdf-canvas-wrap" style="border:1px solid var(--border); border-radius:8px; overflow:auto; max-height:60vh; background:#f1f5f9; text-align:center; cursor:grab;"></div>' +
+          '<div id="pdf-canvas-wrap" style="border:1px solid var(--border); border-radius:8px; overflow:auto; background:#f1f5f9; text-align:center; cursor:grab;"></div>' +
           '<div class="row" style="justify-content:space-between; margin-top:10px;">' +
             '<div class="row" style="gap:6px;">' +
               '<button class="btn btn-sm" id="pdf-prev">&larr; Попередня</button>' +
@@ -1476,7 +1579,13 @@
 
     var zoom = 1;
     var ZOOM_STEPS = [1, 1.5, 2, 3, 4, 6, 8];
-    var BASE_WIDTH = 860;
+    // Zoom 1 means "fits the viewport", so the base follows the window rather than a
+    // fixed number — otherwise a full-screen picker would show a small page in the middle.
+    function baseWidth() {
+      var wrap = document.getElementById("pdf-canvas-wrap");
+      var w = wrap ? wrap.clientWidth : 0;
+      return Math.max(860, Math.round((w || 860) - 4));
+    }
 
     function setZoom(z, keepScroll) {
       zoom = Math.max(ZOOM_STEPS[0], Math.min(ZOOM_STEPS[ZOOM_STEPS.length - 1], z));
@@ -1525,10 +1634,13 @@
         relX = (wrap.scrollLeft + wrap.clientWidth / 2) / wrap.scrollWidth;
         relY = (wrap.scrollTop + wrap.clientHeight / 2) / wrap.scrollHeight;
       }
-      renderPdfPageToCanvas(pdfDoc, currentPage, Math.round(BASE_WIDTH * zoom)).then(function (canvas) {
+      renderPdfPageToCanvas(pdfDoc, currentPage, Math.round(baseWidth() * zoom)).then(function (canvas) {
         canvas.style.display = "block";
         canvas.style.margin = "0 auto";
-        if (zoom === 1) canvas.style.maxWidth = "100%";
+        // At zoom 1 the whole sheet must be visible at once — that is the view you
+        // frame the elevation from. Canvas is a replaced element, so capping both
+        // dimensions shrinks it to fit while keeping its aspect ratio.
+        if (zoom === 1) { canvas.style.maxWidth = "100%"; canvas.style.maxHeight = "100%"; }
         wrap.innerHTML = "";
         var holder = document.createElement("div");
         holder.style.position = "relative";
@@ -1824,7 +1936,7 @@
         '<div class="stat"><div class="v" style="color:var(--brand-700);">' + (last5.length ? pct(avgLast5) : "—") + '</div><div class="l">F1 за останні 5</div></div>' +
         '<div class="stat"><div class="v" style="color:var(--green);">' + (scored.length ? pct(best) : "—") + '</div><div class="l">найкращий F1</div></div>' +
         '<div class="stat"><div class="v">' + (!scored.length ? "—" : avgLast5 >= avgF1 ? "↑" : "↓") + '</div><div class="l">динаміка</div></div>' +
-      '</div>';
+      '</div>' + MissedFocusPanel();
 
     return (
       '<div>' +
