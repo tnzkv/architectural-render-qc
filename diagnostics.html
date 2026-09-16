@@ -138,13 +138,28 @@ function checkQuota() {
   return navigator.storage.estimate().then(function (est) {
     return (navigator.storage.persisted ? navigator.storage.persisted() : Promise.resolve(false))
       .then(function (p) {
+        // Two different mechanisms get confused here, so name them apart: this flag
+        // is only about eviction under disk pressure. It says nothing about the
+        // browser's own "clear cookies and site data on close" setting, which wipes
+        // storage regardless of the persisted bit — that one is the real data-eater.
+        var isFile = location.protocol === "file:";
         box(p ? "ok" : "warn", "4. Режим сховища",
           '<p>Використано ' + ((est.usage || 0) / 1048576).toFixed(1) + ' МБ з ' +
-          ((est.quota || 0) / 1048576).toFixed(0) + ' МБ</p>' +
-          (p ? '<p><b>Постійне</b> — браузер не витісняє ці дані автоматично.</p>'
-             : '<p><b>⚠️ Тимчасове (best-effort).</b> Браузер має право стерти сховище цього походження ' +
-               'повністю — разом із історією перевірок — коли на диску бракує місця. Для сторінок, ' +
-               'відкритих як <code>file://</code>, Chrome постійний режим не видає.</p>'));
+          ((est.quota || 0) / 1048576).toFixed(0) + ' МБ · походження <code>' + esc(location.origin) + '</code></p>' +
+          (p ? '<p><b>Постійне</b> — браузер не витісняє ці дані при браку місця на диску.</p>'
+             : '<p><b>Тимчасове (best-effort).</b> Браузер має право стерти це сховище, але ' +
+               '<b>лише коли на диску справді бракує місця</b>. ' +
+               (isFile
+                 ? 'Сторінка відкрита як <code>file://</code>, а таким сторінкам постійний режим ' +
+                   'не видається ніколи — відкривайте застосунок за адресою https.'
+                 : 'Постійний режим видається за «сигналами довіри» — найпростіше додати сторінку ' +
+                   'в закладки (Ctrl+D). Некритично, поки на диску є вільне місце.') + '</p>') +
+          '<p style="border-top:1px dashed #e2e8f0; padding-top:8px; margin-bottom:0;">' +
+            '<b>Це не захищає від очищення при закритті браузера.</b> Якщо в Edge увімкнено ' +
+            '«Очищати при закритті → Файли cookie та інші дані сайтів», сховище стирається щоразу, ' +
+            'незалежно від режиму вище. Захищає лише виняток для цього сайту: ' +
+            '<code>edge://settings/clearBrowsingDataOnClose</code> → «Додати» → <code>' +
+            esc(location.hostname || "цей сайт") + '</code>.</p>');
       });
   }).catch(function () { box("", "4. Квота", "Не вдалося прочитати."); });
 }
